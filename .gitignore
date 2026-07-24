@@ -1,0 +1,46 @@
+# ─── Secrets & user uploads (NEVER commit) ───────────────────────────────
+upload/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.jks
+*.keystore
+secrets/
+PAT
+PAT.txt
+
+# ─── Skill / agent tooling (internal) ────────────────────────────────────
+skills/
+node_modules/
+
+# ─── Rust / cargo ────────────────────────────────────────────────────────
+target/
+**/*.rs.bk
+Cargo.lock.bak
+*.pdb
+
+# ─── Android / Gradle ────────────────────────────────────────────────────
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+*.iml
+.gradle/
+build/
+app/build/
+local.properties
+.idea/
+captures/
+.cxx/
+*.log
+.DS_Store
+
+# ─── Editor / OS ─────────────────────────────────────────────────────────
+.vscode/
+*.swp
+*~
+Thumbs.db
