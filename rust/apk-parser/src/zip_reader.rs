@@ -122,6 +122,14 @@ impl<R: Read + Seek> ZipReader<R> {
     }
 
     /// Read a single entry's decompressed bytes.
+    ///
+    /// Uses the central-directory sizes (authoritative) rather than the local
+    /// file header sizes, which may be zero (data descriptor flag) or stale on
+    /// APKs produced by streaming writers / repackaging tools. Trusting the
+    /// LFH sizes can feed a truncated deflate stream to miniz_oxide, which
+    /// panics with `assertion failed: n <= init_unfilled`. The decompression
+    /// is also wrapped in `catch_unwind` so any future malformed input becomes
+    /// an `ApkError` instead of crashing the JNI process.
     pub fn read(&mut self, name: &str) -> Result<Vec<u8>, ApkError> {
         let idx = self
             .entries
@@ -130,7 +138,13 @@ impl<R: Read + Seek> ZipReader<R> {
             .ok_or_else(|| ApkError::NotFound(name.to_string()))?;
         let lfh_off = self.lfh_offsets[idx];
 
-        // Parse local file header
+        // Authoritative sizes from the central directory header.
+        let entry = self.entries[idx].clone();
+        let method = if entry.is_compressed { 8u16 } else { 0u16 };
+        let compressed_size = entry.compressed_size;
+        let uncompressed_size = entry.uncompressed_size;
+
+        // Parse local file header — only to skip past name + extra fields.
         self.reader.seek(SeekFrom::Start(lfh_off))?;
         let mut sig = [0u8; 4];
         self.reader.read_exact(&mut sig)?;
@@ -139,9 +153,6 @@ impl<R: Read + Seek> ZipReader<R> {
         }
         let mut lhdr = [0u8; 26];
         self.reader.read_exact(&mut lhdr)?;
-        let method = u16_le(&lhdr[4..6]);
-        let compressed_size = u32_le(&lhdr[14..18]) as u64;
-        let uncompressed_size = u32_le(&lhdr[18..22]) as u64;
         let name_len = u16_le(&lhdr[22..24]) as usize;
         let extra_len = u16_le(&lhdr[24..26]) as usize;
         self.reader
@@ -154,10 +165,30 @@ impl<R: Read + Seek> ZipReader<R> {
             0 => Ok(compressed), // stored
             8 => {
                 use std::io::Cursor;
-                let mut d = flate2::read::DeflateDecoder::new(Cursor::new(compressed));
+                let decoder = flate2::read::DeflateDecoder::new(Cursor::new(compressed));
                 let mut out = Vec::with_capacity(uncompressed_size as usize);
-                d.read_to_end(&mut out)?;
-                Ok(out)
+                // miniz_oxide can panic on malformed deflate input (e.g.
+                // `assertion failed: n <= init_unfilled`). Catch the panic so
+                // a malformed APK returns an error instead of taking down the
+                // JNI process.
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let mut d = decoder;
+                    d.read_to_end(&mut out)
+                }));
+                match result {
+                    Ok(Ok(())) => Ok(out),
+                    Ok(Err(e)) => Err(ApkError::from(e)),
+                    Err(payload) => {
+                        let msg = if let Some(s) = payload.downcast_ref::<&'static str>() {
+                            s.to_string()
+                        } else if let Some(s) = payload.downcast_ref::<String>() {
+                            s.clone()
+                        } else {
+                            "unknown panic".to_string()
+                        };
+                        Err(ApkError::Zip(format!("deflate panic for {}: {}", name, msg)))
+                    }
+                }
             }
             m => Err(ApkError::Zip(format!("unsupported compression: {}", m))),
         }
