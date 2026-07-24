@@ -71,12 +71,27 @@ jobs:
         working-directory: android
         run: ./gradlew :app:assembleDebug
 
+      - name: Gradle build (release, R8 minified)
+        working-directory: android
+        run: ./gradlew :app:assembleRelease
+
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
           name: apk-detector-debug-apk
           path: android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload release APK (R8 minified)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-detector-release-apk
+          path: |
+            android/app/build/outputs/apk/release/*.apk
+            android/app/build/outputs/mapping/release/mapping.txt
+          if-no-files-found: warn
           retention-days: 30
 
       - name: Upload native libraries
