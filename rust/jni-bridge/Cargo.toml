@@ -6,6 +6,7 @@ license.workspace = true
 description = "JNI exports consumed by id.zai.apkdetector Kotlin app"
 
 [lib]
+name = "apk_detector"
 crate-type = ["cdylib"]
 
 [dependencies]
