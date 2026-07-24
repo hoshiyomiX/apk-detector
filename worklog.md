@@ -137,3 +137,34 @@ r8_effectiveness:
   - percentage: 78% smaller
   - mechanism: R8 full mode (AGP 8.x default) + isShrinkResources=true
 next_step: User can download `apk-detector-release-apk` from https://github.com/hoshiyomiX/apk-detector/actions/runs/30104645564 — install on Android device via `adb install`. Note: release APK is unsigned (v0.1 — no keystore yet). Test that JNI calls (NativeBridge.scanApk etc.) resolve at runtime — if they crash with NoSuchMethodError, the ProGuard keep rules need widening. v0.2 dynamic analysis still pending; release signing pipeline (keystore, apksigner) deferred until user requests.
+
+---
+last_phase: DELIVER
+task: Analyze crash log https://bin.kv2.dev/~6a6384640f0ca400138db215 and fix root cause
+complexity: Standard
+task_type: Coding
+files_modified:
+  - rust/jni-bridge/Cargo.toml (+1 line: [lib] name = "apk_detector")
+phase_trace: IDLE→SPECIFY→PLAN→IMPLEMENT→VERIFY→DELIVER
+traceability:
+  - FIX-001: Add [lib] name = "apk_detector" to jni-bridge Cargo.toml — overrides .so basename from libjni_bridge.so to libapk_detector.so — ✓
+  - FIX-002: Push, CI run #9 (sha ad163ca, run_id 30105670082) completed/success — ✓
+  - FIX-003: Verified native-libs artifact zip contains libapk_detector.so per ABI (arm64-v8a, armeabi-v7a, x86_64) — ✓
+  - FIX-004 (bonus): Verified release APK (app-release-unsigned.apk) contains lib/<abi>/libapk_detector.so for all 3 ABIs — ✓
+pivot: NONE
+scope_drift: NONE
+proximate_cause_triage:
+  - symptom: "java.lang.UnsatisfiedLinkError: dlopen failed: library \"libapk_detector.so\" not found at NativeBridge.<clinit>"
+  - candidate: ".so name mismatch — Kotlin calls System.loadLibrary(\"apk_detector\") but Rust crate produces libjni_bridge.so"
+  - Q1_within_1_hop: YES (directly in [lib] section of Cargo.toml vs System.loadLibrary call)
+  - Q2_assumptions: 1 (cargo honors [lib].name over package.name for cdylib basename — well-documented Cargo feature)
+  - Q3_fixes_request: YES (crash log shows dlopen failing on libapk_detector.so)
+  - decision: FIX NOW
+  - rabbit_hole_avoided: did NOT investigate Infinix device-specific dlopen quirks, Android 11 SELinux policies, or Compose classloader behavior — all red herrings since .so was simply not packaged under the expected name
+ci_runs:
+  - "#9 (run_id 30105670082, sha ad163ca): SUCCESS — 3 artifacts, libapk_detector.so verified in both native-libs artifact and inside release APK"
+artifact_verification:
+  - apk-detector-native-libs: zip contains {arm64-v8a,armeabi-v7a,x86_64}/libapk_detector.so (was libjni_bridge.so in run #8)
+  - apk-detector-release-apk: app-release-unsigned.apk lib/ directory contains libapk_detector.so for all 3 ABIs
+  - apk-detector-debug-apk: 15.79 MB (unchanged)
+next_step: User to download fresh apk-detector-release-apk from https://github.com/hoshiyomiX/apk-detector/actions/runs/30105670082 — install on Infinix X695C (Android 11) or any Android 7.0+ device — verify PickerScreen loads without crashing. If a NEW crash appears (e.g., NoSuchMethodError on scanApk), that indicates R8 stripped a JNI method name — the ProGuard keep rules should prevent this but only device testing confirms. v0.2 dynamic analysis still pending.
