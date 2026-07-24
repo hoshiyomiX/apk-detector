@@ -296,7 +296,7 @@ fn json_escape(s: &str) -> String {
 // 1) scanApk(path: String): String  — Markdown report (or {"error": "..."})
 // ---------------------------------------------------------------------------
 #[no_mangle]
-pub unsafe extern "system" fn Java_id_zai_apkdetector_NativeBridge_scanApk(
+pub unsafe extern "system" fn Java_id_zai_apkdetector_data_NativeBridge_scanApk(
     env: JNIEnvPtr,
     _class: jclass,
     path_jstr: jstring,
@@ -332,7 +332,7 @@ pub unsafe extern "system" fn Java_id_zai_apkdetector_NativeBridge_scanApk(
 // 2) diffApks(oldPath: String, newPath: String): String  — Markdown diff
 // ---------------------------------------------------------------------------
 #[no_mangle]
-pub unsafe extern "system" fn Java_id_zai_apkdetector_NativeBridge_diffApks(
+pub unsafe extern "system" fn Java_id_zai_apkdetector_data_NativeBridge_diffApks(
     env: JNIEnvPtr,
     _class: jclass,
     old_path_jstr: jstring,
@@ -380,7 +380,7 @@ fn scan_to_findings(path: &str, sigs: &SigSet) -> Result<Vec<detector::Finding>,
 // 3) listSignatures(): String  — JSON array of rule metadata
 // ---------------------------------------------------------------------------
 #[no_mangle]
-pub unsafe extern "system" fn Java_id_zai_apkdetector_NativeBridge_listSignatures(
+pub unsafe extern "system" fn Java_id_zai_apkdetector_data_NativeBridge_listSignatures(
     env: JNIEnvPtr,
     _class: jclass,
 ) -> jstring {
@@ -415,7 +415,7 @@ pub unsafe extern "system" fn Java_id_zai_apkdetector_NativeBridge_listSignature
 // 4) engineVersion(): String  — semver
 // ---------------------------------------------------------------------------
 #[no_mangle]
-pub unsafe extern "system" fn Java_id_zai_apkdetector_NativeBridge_engineVersion(
+pub unsafe extern "system" fn Java_id_zai_apkdetector_data_NativeBridge_engineVersion(
     env: JNIEnvPtr,
     _class: jclass,
 ) -> jstring {

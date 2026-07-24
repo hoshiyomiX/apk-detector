@@ -3,10 +3,10 @@
 //! JNI exports consumed by the Kotlin app `id.zai.apkdetector`.
 //!
 //! Four exports:
-//!   - `Java_id_zai_apkdetector_NativeBridge_scanApk`     — scan a single APK
-//!   - `Java_id_zai_apkdetector_NativeBridge_diffApks`    — diff two APKs
-//!   - `Java_id_zai_apkdetector_NativeBridge_listSignatures` — list built-in rules
-//!   - `Java_id_zai_apkdetector_NativeBridge_engineVersion`  — semver string
+//!   - `Java_id_zai_apkdetector_data_NativeBridge_scanApk`     — scan a single APK
+//!   - `Java_id_zai_apkdetector_data_NativeBridge_diffApks`    — diff two APKs
+//!   - `Java_id_zai_apkdetector_data_NativeBridge_listSignatures` — list built-in rules
+//!   - `Java_id_zai_apkdetector_data_NativeBridge_engineVersion`  — semver string
 //!
 //! All functions return Java strings (UTF-8). Errors are returned as a JSON
 //! object `{"error": "..."}` so the Kotlin side can surface them in the UI.
