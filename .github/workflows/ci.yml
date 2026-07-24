@@ -70,3 +70,31 @@ jobs:
       - name: Gradle build (debug)
         working-directory: android
         run: ./gradlew :app:assembleDebug
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-detector-debug-apk
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload native libraries
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-detector-native-libs
+          path: |
+            android/app/src/main/jniLibs/*/*.so
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload build reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-detector-build-reports
+          path: |
+            android/app/build/reports
+            android/build/reports
+          if-no-files-found: ignore
+          retention-days: 7
