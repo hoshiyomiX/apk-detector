@@ -108,3 +108,32 @@ proximate_cause_triage:
   - Q3_fixes_request: YES
   - decision: FIX NOW
 next_step: User can download `apk-detector-debug-apk` from https://github.com/hoshiyomiX/apk-detector/actions/runs/30102653872 — install on Android 7.0+ device, pick OCTO Mobile Banking APK via SAF picker, verify 8-category Markdown report renders. v0.2 dynamic analysis still pending.
+
+---
+last_phase: DELIVER
+task: Add release APK artifact with R8 minification to CI
+complexity: Standard
+task_type: Coding
+files_modified:
+  - android/app/build.gradle.kts (release buildType: isMinifyEnabled=true + isShrinkResources=true)
+  - android/app/proguard-rules.pro (expanded from 4 lines to 7 sections: JNI/Room/Kotlin/Compose/Coroutines/Entry-points/R8-hints)
+  - .github/workflows/ci.yml (+2 steps: :app:assembleRelease + Upload release APK with if: always())
+phase_trace: IDLE→SPECIFY→PLAN→IMPLEMENT→VERIFY→DELIVER
+traceability:
+  - IMPL-001: Enable R8 minify + resource shrink in release buildType — ✓
+  - IMPL-002: Expand proguard-rules.pro with keep rules for NativeBridge JNI (scanApk/diffApks/listSignatures/engineVersion) + Room DAOs + Kotlin metadata + Compose + Coroutines + app entry points — ✓
+  - IMPL-003: Add :app:assembleRelease + Upload release APK (if: always()) steps to ci.yml android-check job — ✓
+  - IMPL-004: End-to-end verification — CI run #8 (sha 1a33e7c, run_id 30104645564) completed/success
+pivot: NONE
+scope_drift: NONE
+ci_runs:
+  - "#8 (run_id 30104645564, sha 1a33e7c): SUCCESS — 3 artifacts uploaded"
+artifact_sizes:
+  - apk-detector-debug-apk: 15.79 MB
+  - apk-detector-release-apk: 3.48 MB (R8 + resource shrink → 78% size reduction vs debug)
+  - apk-detector-native-libs: 0.82 MB
+r8_effectiveness:
+  - size_reduction: 12.31 MB saved (15.79 → 3.48 MB)
+  - percentage: 78% smaller
+  - mechanism: R8 full mode (AGP 8.x default) + isShrinkResources=true
+next_step: User can download `apk-detector-release-apk` from https://github.com/hoshiyomiX/apk-detector/actions/runs/30104645564 — install on Android device via `adb install`. Note: release APK is unsigned (v0.1 — no keystore yet). Test that JNI calls (NativeBridge.scanApk etc.) resolve at runtime — if they crash with NoSuchMethodError, the ProGuard keep rules need widening. v0.2 dynamic analysis still pending; release signing pipeline (keystore, apksigner) deferred until user requests.
