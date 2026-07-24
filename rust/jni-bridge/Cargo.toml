@@ -1,0 +1,16 @@
+[package]
+name = "jni-bridge"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "JNI exports consumed by id.zai.apkdetector Kotlin app"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+detector = { path = "../detector" }
+apk-parser = { path = "../apk-parser" }
+signatures = { path = "../signatures" }
+log.workspace = true
+android_logger = "0.13"

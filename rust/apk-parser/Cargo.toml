@@ -1,0 +1,16 @@
+[package]
+name = "apk-parser"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Minimal APK reader: ZIP, AXML, DEX string table, ELF enumeration"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+byteorder.workspace = true
+bytes.workspace = true
+log.workspace = true
+thiserror = "1.0"
+flate2 = { version = "1.0", default-features = false, features = ["rust_backend"] }

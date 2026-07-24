@@ -1,0 +1,60 @@
+# Anti-tamper signatures
+# Sources: app-security-resources, OWASP Mobile Top 10 2024
+---
+- id: anti-tamper-signature-get-installed
+  name: "PackageManager.GET_SIGNATURES"
+  category: anti_tamper
+  severity: high
+  evidence_location: dex_string
+  patterns:
+    - "getInstalledPackages"
+    - "GET_SIGNATURES"
+    - "getPackageInfo"
+  description: "Reads signing certificate to detect repackaging. (Common — also used by benign apps.)"
+  bypass_hint: signature-spoof-xposed
+
+- id: anti-tamper-pm-get-signatures-v2
+  name: "PackageManager GET_SIGNING_CERTIFICATES (v2+)"
+  category: anti_tamper
+  severity: high
+  evidence_location: dex_string
+  patterns:
+    - "GET_SIGNING_CERTIFICATES"
+    - "getSigningInfo"
+    - "hasSigningCertificate"
+  description: "Uses the API 28+ signing-info API to verify the APK's v2/v3 signature."
+
+- id: anti-tamper-self-integrity
+  name: "APK self-integrity check"
+  category: anti_tamper
+  severity: high
+  evidence_location: dex_string
+  patterns:
+    - "/data/app/"
+    - ".apk"
+    - "MessageDigest.getInstance(\"SHA-256\")"
+    - "jarVerify"
+  description: "Computes a hash of the APK file at runtime and compares against expected value."
+  bypass_hint: self-integrity-redirect
+
+- id: anti-tamper-strict-jar
+  name: "StrictJarVerifier use"
+  category: anti_tamper
+  severity: medium
+  evidence_location: dex_string
+  patterns:
+    - "StrictJarVerifier"
+    - "StrictJarFile"
+  description: "Uses StrictJarVerifier to validate APK JAR signature manually."
+
+- id: anti-tamper-dex-crc
+  name: "DEX CRC sanity check"
+  category: anti_tamper
+  severity: medium
+  evidence_location: dex_string
+  patterns:
+    - "Adler32"
+    - "checksum()"
+    - "CRC32"
+  description: "Computes DEX CRC at runtime to detect bytecode modification."
+  bypass_hint: dex-crc-patch

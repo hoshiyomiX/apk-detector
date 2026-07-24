@@ -1,0 +1,76 @@
+# App hardening / packer signatures
+# Sources: AV-TEST Android packer survey 2023; Chinese packer research
+---
+- id: hardening-bangcle
+  name: "Bangcle / Secneo packer"
+  category: app_hardening
+  severity: high
+  evidence_location: native_lib_name
+  patterns:
+    - "libsecexe"
+    - "libsecmain"
+    - "libDexHelper"
+  description: "Bangcle APK packer — DEX is encrypted and loaded at runtime."
+
+- id: hardening-bangcle-java
+  name: "Bangcle Java loader"
+  category: app_hardening
+  severity: high
+  evidence_location: dex_string
+  patterns:
+    - "com/secneo/apk/ApkProtect"
+    - "com.secapk.wrapper"
+  description: "Bangcle Java-side Application subclass that loads the real DEX."
+
+- id: hardening-ijiami
+  name: "Ijiami packer"
+  category: app_hardening
+  severity: high
+  evidence_location: dex_string
+  patterns:
+    - "com/ijiami"
+    - "IjiamiprotectApplication"
+  description: "Ijiami APK packer — runtime DEX decryption."
+
+- id: hardening-qihoo-360
+  name: "Qihoo 360 Jiagu"
+  category: app_hardening
+  severity: high
+  evidence_location: native_lib_name
+  patterns:
+    - "libjiagu"
+    - "libjiagu_a"
+    - "libjiagu_x86"
+  description: "Qihoo 360 Jiagu packer — used by many Chinese fintech apps."
+
+- id: hardening-tencent-legu
+  name: "Tencent Legu packer"
+  category: app_hardening
+  severity: high
+  evidence_location: native_lib_name
+  patterns:
+    - "libshell"
+    - "libshella"
+    - "libtup"
+  description: "Tencent Legu (a.k.a. Tencent shell) — runtime DEX unpacking."
+
+- id: hardening-tencent-legu-java
+  name: "Tencent Legu Java entry"
+  category: app_hardening
+  severity: high
+  evidence_location: dex_string
+  patterns:
+    - "com/tencent/qqgame/legu"
+    - "com.tencent.StubShell"
+  description: "Tencent Legu Java-side Application stub."
+
+- id: hardening-naga-ali
+  name: "NAGA / Ali packer"
+  category: app_hardening
+  severity: medium
+  evidence_location: native_lib_name
+  patterns:
+    - "libnaga"
+    - "libalisec"
+    - "libmobisec"
+  description: "Alibaba Mobile Security packer (used by Alipay, Taobao)."

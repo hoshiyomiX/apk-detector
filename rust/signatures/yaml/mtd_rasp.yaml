@@ -1,0 +1,83 @@
+# MTD / RASP SDK signatures
+# Sources: vendor docs + research papers (Positive Technologies 2023, Guardsquare 2024)
+---
+- id: mtd-promon-shield
+  name: "Promon SHIELD"
+  category: mtd_rasp
+  severity: critical
+  evidence_location: native_lib_name
+  patterns:
+    - "libpromon"
+    - "libPShield"
+  description: "Promon SHIELD RASP — runtime self-protection + anti-tamper."
+  bypass_hint: rasp-runtime-hook
+
+- id: mtd-promon-shield-java
+  name: "Promon SHIELD Java init"
+  category: mtd_rasp
+  severity: critical
+  evidence_location: dex_string
+  patterns:
+    - "com/promon/shield"
+    - "com.promon.shield.PromonShield"
+  description: "Promon SHIELD Java-side initialization class."
+
+- id: mtd-onespan-appshield
+  name: "OneSpan App Shield"
+  category: mtd_rasp
+  severity: critical
+  evidence_location: native_lib_name
+  patterns:
+    - "libAppShield"
+    - "libonespan"
+  description: "OneSpan (Vasco) App Shielding runtime protection."
+
+- id: mtd-arxan
+  name: "Arxan/Thales Mobile Protection"
+  category: mtd_rasp
+  severity: critical
+  evidence_location: native_lib_name
+  patterns:
+    - "libarxan"
+    - "libthales"
+  description: "Arxan (now Thales) application shielding."
+
+- id: mtd-guardsquare-dexguard
+  name: "Guardsquare DexGuard"
+  category: mtd_rasp
+  severity: high
+  evidence_location: dex_string
+  patterns:
+    - "com/guardsquare"
+    - "DexGuard"
+  description: "DexGuard runtime + obfuscation — commercial RASP."
+
+- id: mtd-guardsquare-proguard-mapping
+  name: "Guardsquare ProGuard enterprise"
+  category: mtd_rasp
+  severity: low
+  evidence_location: dex_string
+  patterns:
+    - "proguard.MapClassLoader"
+  description: "ProGuard enterprise runtime mapping (low-confidence signal)."
+
+- id: mtd-verimatrix
+  name: "Verimatrix Application Protection"
+  category: mtd_rasp
+  severity: critical
+  evidence_location: native_lib_name
+  patterns:
+    - "libvkey"
+    - "libvcypher"
+    - "libvrasp"
+  description: "Verimatrix (formerly Inside Secure) app protection SDK."
+
+- id: mtd-pinch-secure
+  name: "Pinch Secure / AstraPay"
+  category: mtd_rasp
+  severity: high
+  evidence_location: native_lib_name
+  patterns:
+    - "libpinch"
+    - "libsecure"
+  description: "Pinch secure-tunneling library used by Indonesian fintech SDKs."

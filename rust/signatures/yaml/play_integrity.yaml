@@ -1,0 +1,36 @@
+# Play Integrity API usage
+# Sources: Google Play Integrity API docs (2024); common banking SDKs
+---
+- id: play-integrity-api-call
+  name: "Play Integrity API request"
+  category: play_integrity
+  severity: high
+  evidence_location: dex_string
+  patterns:
+    - "com.google.android.play.core.integrity"
+    - "IntegrityService"
+    - "requestIntegrityToken"
+    - "StandardIntegrityManager"
+  description: "Calls Google Play Integrity API to verify device + app authenticity."
+  bypass_hint: play-integrity-spoof
+
+- id: play-integrity-manager-impl
+  name: "Integrity token verification"
+  category: play_integrity
+  severity: high
+  evidence_location: dex_string
+  patterns:
+    - "IntegrityTokenResponse"
+    - "decodeIntegrityTokenResponse"
+  description: "Verifies the integrity token returned by Play Services."
+
+- id: play-integrity-safety-net-legacy
+  name: "Legacy SafetyNet attestation"
+  category: play_integrity
+  severity: medium
+  evidence_location: dex_string
+  patterns:
+    - "com.google.android.safetynet"
+    - "SafetyNetApi"
+    - "attest"
+  description: "Uses the deprecated SafetyNet Attestation API (pre-Play-Integrity)."

@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!--
+        APK Detector deliberately ships WITHOUT the INTERNET permission.
+        All scanning is on-device. Reports only leave the device when the
+        user explicitly invokes Android's share sheet.
+
+        We DO need READ permission for the target APK files. On Android 11+
+        we use Storage Access Framework (SAF) instead of legacy storage
+        permissions — this matches the user's "permission denied → SAF"
+        edge case handling.
+    -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+
+    <!-- No INTERNET permission. No ACCESS_NETWORK_STATE. No ANALYTICS. -->
+
+    <application
+        android:name=".ApkDetectorApp"
+        android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.APKDetector"
+        tools:targetApi="34">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:theme="@style/Theme.APKDetector">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!--
+                Receive APK files via share sheet from other apps (e.g. file managers).
+                This lets a user tap an APK → Share → APK Detector.
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/vnd.android.package-archive" />
+            </intent-filter>
+        </activity>
+    </application>
+
+</manifest>

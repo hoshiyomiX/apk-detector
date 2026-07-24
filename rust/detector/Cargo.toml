@@ -1,0 +1,17 @@
+[package]
+name = "detector"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "8 detector modules + bypass hints + Markdown report + diff engine"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+apk-parser = { path = "../apk-parser" }
+signatures = { path = "../signatures" }
+log.workspace = true
+thiserror = "1.0"
+serde.workspace = true
+serde_json = "1.0"

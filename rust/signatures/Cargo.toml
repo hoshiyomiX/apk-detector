@@ -1,0 +1,15 @@
+[package]
+name = "signatures"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "YAML-based detection signatures for the 8 APK defense categories"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+serde.workspace = true
+serde_yaml.workspace = true
+log.workspace = true
+thiserror = "1.0"

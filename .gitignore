@@ -17,6 +17,7 @@ scripts/
 
 # ─── Skill / agent tooling (internal) ────────────────────────────────────
 skills/
+.zscripts/
 node_modules/
 
 # ─── Rust / cargo ────────────────────────────────────────────────────────

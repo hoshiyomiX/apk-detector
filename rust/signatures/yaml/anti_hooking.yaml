@@ -1,0 +1,78 @@
+# Anti-hooking signatures
+# Sources: Frida + Xposed detection blog posts (NowSecure, Fooying 2022)
+---
+- id: anti-hook-frida-port-scan
+  name: "Frida default-port scan"
+  category: anti_hooking
+  severity: high
+  evidence_location: dex_string
+  patterns:
+    - "127.0.0.1:27042"
+    - "tcp:27042"
+    - ":27042"
+  description: "Connects to Frida's default daemon port to detect runtime injection."
+  bypass_hint: frida-non-default-port
+
+- id: anti-hook-frida-process-scan
+  name: "Frida process-name scan"
+  category: anti_hooking
+  severity: high
+  evidence_location: dex_string
+  patterns:
+    - "frida-server"
+    - "frida-agent"
+    - "frida-gadget"
+    - "linjector"
+  description: "Enumerates /proc to look for Frida daemon processes."
+
+- id: anti-hook-frida-maps-scan
+  name: "Frida maps scan"
+  category: anti_hooking
+  severity: high
+  evidence_location: dex_string
+  patterns:
+    - "/proc/self/maps"
+    - "frida"
+    - "gum-js-loop"
+    - "gmain"
+  description: "Reads /proc/self/maps for Frida shared-object fingerprints."
+
+- id: anti-hook-xposed-installer-check
+  name: "Xposed Installer package check"
+  category: anti_hooking
+  severity: medium
+  evidence_location: dex_string
+  patterns:
+    - "de.robv.android.xposed.installer"
+    - "de.robv.android.xposed.XposedBridge"
+  description: "Checks PackageManager for Xposed Installer."
+
+- id: anti-hook-xposed-bridge-class
+  name: "XposedBridge class lookup"
+  category: anti_hooking
+  severity: high
+  evidence_location: dex_string
+  patterns:
+    - "de.robv.android.xposed.XposedBridge"
+    - "XposedHelpers"
+  description: "Attempts to load XposedBridge via Class.forName."
+
+- id: anti-hook-substrate
+  name: "Substrate (Cydia) detection"
+  category: anti_hooking
+  severity: medium
+  evidence_location: dex_string
+  patterns:
+    - "com.saurik.substrate"
+    - "MSHookMethod"
+  description: "Detects Cydia Substrate hooking framework."
+
+- id: anti-hook-lsplant
+  name: "LSPlant / Pine detector"
+  category: anti_hooking
+  severity: high
+  evidence_location: native_lib_name
+  patterns:
+    - "liblsplant"
+    - "libpine"
+  description: "Detects LSPlant / Pine ART-hooking native libs in app's lib dir."

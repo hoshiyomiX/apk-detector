@@ -1,0 +1,90 @@
+# Anti-emulator signatures
+# Sources: Android emulator-detection repos (strazzere/anti-emulator, bluepill)
+---
+- id: anti-emulator-build-fingerprint
+  name: "Build.FINGERPRINT substring check"
+  category: anti_emulator
+  severity: medium
+  evidence_location: dex_string
+  patterns:
+    - "generic_x86"
+    - "generic_x64"
+    - "generic_arm64"
+    - "unknown"
+    - "sdk_gphone"
+    - "sdk_google"
+    - "google_sdk"
+  description: "Checks Build.FINGERPRINT/MODEL/PRODUCT for emulator markers."
+
+- id: anti-emulator-build-manufacturer
+  name: "Build.MANUFACTURER/BRAND check"
+  category: anti_emulator
+  severity: low
+  evidence_location: dex_string
+  patterns:
+    - "Build.MANUFACTURER"
+    - "Build.BRAND"
+    - "Build.HARDWARE"
+    - "Build.MODEL"
+  description: "Reads Build.* fields (alone is weak; usually combined with fingerprint check)."
+
+- id: anti-emulator-files
+  name: "Emulator-specific file check"
+  category: anti_emulator
+  severity: high
+  evidence_location: dex_string
+  patterns:
+    - "/dev/socket/qemud"
+    - "/dev/qemu_pipe"
+    - "/system/bin/qemu-props"
+    - "/sys/class/bdi/0:8"
+    - "/system/lib/libc_malloc_debug_qemu.so"
+    - "/proc/cpuinfo"
+  description: "Touches filesystem paths that only exist on QEMU/emulator images."
+
+- id: anti-emulator-network
+  name: "Emulator network probe"
+  category: anti_emulator
+  severity: medium
+  evidence_location: dex_string
+  patterns:
+    - "10.0.2.15"
+    - "10.0.2.2"
+    - "eth0"
+  description: "Checks IP/iface for default emulator networking."
+
+- id: anti-emulator-telephony
+  name: "Telephony emulator markers"
+  category: anti_emulator
+  severity: medium
+  evidence_location: dex_string
+  patterns:
+    - "15555215554"
+    - "15555215556"
+    - "TelephonyManager"
+    - "getDeviceId().equals"
+    - "getSubscriberId"
+  description: "Probes TelephonyManager — emulator returns well-known dummy values."
+
+- id: anti-emulator-sensors
+  name: "Sensor / hardware presence check"
+  category: anti_emulator
+  severity: medium
+  evidence_location: dex_string
+  patterns:
+    - "SensorManager"
+    - "TYPE_ACCELEROMETER"
+    - "TYPE_GYROSCOPE"
+  description: "Checks for absence of expected hardware sensors (weak signal alone)."
+
+- id: anti-emulator-bluestacks
+  name: "BlueStacks / Nox / LDPlayer markers"
+  category: anti_emulator
+  severity: high
+  evidence_location: dex_string
+  patterns:
+    - "/sys/class/dmi/id/sys_vendor"
+    - "Bluestacks"
+    - "NOX"
+    - "LDPlayer"
+  description: "Detects desktop Android emulators (BlueStacks, Nox, LDPlayer)."

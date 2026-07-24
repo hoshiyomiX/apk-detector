@@ -1,0 +1,77 @@
+# Root detection signatures
+# Sources: rootBeer, Magisk, common Android banking apps (OCTO, BCA, Mandiri)
+---
+- id: root-check-su-binary
+  name: "su binary path check"
+  category: root
+  severity: medium
+  evidence_location: dex_string
+  patterns:
+    - "/system/bin/su"
+    - "/system/xbin/su"
+    - "/sbin/su"
+    - "/system/sd/xbin/su"
+    - "/system/bin/failsafe/su"
+    - "/data/local/xbin/su"
+    - "/data/local/bin/su"
+    - "/data/local/su"
+  description: "Looks for the su binary at well-known filesystem paths."
+  bypass_hint: root-hide-magisk
+
+- id: root-check-su-package
+  name: "su-installed package check"
+  category: root
+  severity: medium
+  evidence_location: dex_string
+  patterns:
+    - "com.topjohnwu.magisk"
+    - "eu.chainfire.supersu"
+    - "com.koushikdutta.superuser"
+    - "com.thirdparty.superuser"
+  description: "Checks PackageManager for known SuperUser / Magisk apps."
+  bypass_hint: root-hide-magisk
+
+- id: root-check-busybox
+  name: "BusyBox presence check"
+  category: root
+  severity: low
+  evidence_location: dex_string
+  patterns:
+    - "/system/bin/busybox"
+    - "/system/xbin/busybox"
+    - "busybox ps"
+  description: "BusyBox on system partitions is a strong root indicator."
+
+- id: root-check-ro-secure-prop
+  name: "ro.secure / ro.debuggable property check"
+  category: root
+  severity: low
+  evidence_location: dex_string
+  patterns:
+    - "ro.secure"
+    - "ro.debuggable"
+    - "ro.build.selinux"
+    - "service.adb.root"
+  description: "Reads SystemProperties for signs of a non-stock build."
+
+- id: root-check-magisk-lib
+  name: "Magisk native lib presence"
+  category: root
+  severity: high
+  evidence_location: native_lib_name
+  patterns:
+    - "libmagisk"
+    - "libriru"
+    - "libzygisk"
+  description: "Loads Magisk/Riru/Zygisk runtime injection libraries."
+
+- id: root-check-rootbeer-sdk
+  name: "RootBeer library use"
+  category: root
+  severity: medium
+  evidence_location: dex_string
+  patterns:
+    - "com/scottyab/rootbeer"
+    - "RootBeer"
+  description: "App embeds the open-source RootBeer root-detection library."
+  bypass_hint: rootbeer-hook

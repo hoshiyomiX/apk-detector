@@ -1,0 +1,59 @@
+# Clone / repackage detection signatures
+# Sources: app-clone research (Lookout 2023), parallel-space signatures
+---
+- id: clone-parallel-space
+  name: "Parallel Space / Dual Space detection"
+  category: clone_repackage
+  severity: high
+  evidence_location: dex_string
+  patterns:
+    - "com.lbe.parallel"
+    - "com.ludashi.dualspace"
+    - "com.excelliance.dualaid"
+    - "com.excelliance.multidroid"
+  description: "Detects apps that host this APK inside a virtualization container."
+
+- id: clone-virtualapp
+  name: "VirtualApp framework"
+  category: clone_repackage
+  severity: high
+  evidence_location: dex_string
+  patterns:
+    - "com.lody.virtual"
+    - "io.virtualapp"
+    - "VClient"
+    - "VirtualCore"
+  description: "VirtualApp-style in-app clone runtime."
+
+- id: clone-package-name-self-check
+  name: "Hardcoded package name self-check"
+  category: clone_repackage
+  severity: high
+  evidence_location: dex_string
+  patterns:
+    - "getPackageName().equals"
+    - "getPackageName().compareTo"
+  description: "Compares runtime package name against hardcoded expected value (repackage guard)."
+  bypass_hint: clone-pkg-rename
+
+- id: clone-installer-source
+  name: "Installer source check"
+  category: clone_repackage
+  severity: medium
+  evidence_location: dex_string
+  patterns:
+    - "getInstallerPackageName"
+    - "com.android.vending"
+    - "com.google.android.packageinstaller"
+  description: "Checks which app store installed the APK — used to reject sideloaded clones."
+
+- id: clone-meta-data-marker
+  name: "Meta-data clone marker"
+  category: clone_repackage
+  severity: low
+  evidence_location: manifest
+  patterns:
+    - "CLONE_MARKER"
+    - "REPACKAGED_FLAG"
+    - "x-original-pkg"
+  description: "Custom meta-data tag set by anti-clone SDKs (rare — high-confidence if found)."

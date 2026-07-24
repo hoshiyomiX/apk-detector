@@ -1,0 +1,38 @@
+[workspace]
+resolver = "2"
+members = [
+    "apk-parser",
+    "signatures",
+    "detector",
+    "jni-bridge",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+license = "MIT"
+authors = ["Z.ai <z@z.ai>"]
+repository = "https://github.com/hoshiyomiX/apk-detector"
+description = "On-device APK defense-mechanism analyzer"
+
+[workspace.dependencies]
+# Parser crates
+zip = { version = "2.2", default-features = false, features = ["deflate"] }
+flate2 = { version = "1.0", default-features = false, features = ["rust_backend"] }
+byteorder = "1.5"
+bytes = "1.6"
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+# Logging
+log = "0.4"
+# JNI (only for jni-bridge, but defined here for version sync)
+jni-sys = "0.4"
+
+[profile.release]
+opt-level = "z"      # size-optimized for on-device
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
