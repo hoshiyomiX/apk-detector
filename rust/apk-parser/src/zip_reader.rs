@@ -176,7 +176,7 @@ impl<R: Read + Seek> ZipReader<R> {
                     d.read_to_end(&mut out)
                 }));
                 match result {
-                    Ok(Ok(())) => Ok(out),
+                    Ok(Ok(_)) => Ok(out),
                     Ok(Err(e)) => Err(ApkError::from(e)),
                     Err(payload) => {
                         let msg = if let Some(s) = payload.downcast_ref::<&'static str>() {
