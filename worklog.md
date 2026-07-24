@@ -199,3 +199,35 @@ artifact_symbol_verification:
   - nm -D output: 4 T (text/defined) symbols matching Java_id_zai_apkdetector_data_NativeBridge_{diffApks,engineVersion,listSignatures,scanApks}
   - all 4 match Kotlin class FQN id.zai.apkdetector.data.NativeBridge
 next_step: User to download fresh apk-detector-release-apk from https://github.com/hoshiyomiX/apk-detector/actions/runs/30124197001 — install on Infinix X695C (Android 11) or any Android 7.0+ device — PickerScreen should now render with engineVersion() resolving correctly. If a NEW crash appears (e.g., NoSuchMethodError on scanApk, or NoSuchFieldError), send me the new log. If scan completes successfully, v0.1 is working end-to-end.
+
+---
+last_phase: DELIVER
+task: Analyze crash log https://bin.kv2.dev/~6a63cd0a0f0ca400138db493 — duplicate of previous crash, no code fix needed
+complexity: Minimal
+task_type: Coding
+files_modified: none
+phase_trace: IDLE→SPECIFY→PLAN→IMPLEMENT→VERIFY→DELIVER
+traceability: none (diagnosis-only)
+pivot: NONE
+scope_drift: NONE
+proximate_cause_triage:
+  - symptom: "Identical UnsatisfiedLinkError for engineVersion — same as previous crash log"
+  - parsimony_audit:
+    - candidate_A: "Stale APK on device (user couldn't download+install+test+upload in 40s)"
+    - candidate_B: "Run #10 APK still has the bug"
+    - A_assumptions: 1 (CI run #10 completed at 20:36:47Z; new crash at 20:37:27Z — 40s gap is too tight for full download+install+test+upload cycle)
+    - B_assumptions: 3+ (would require CI build cache mismatch OR R8 class renaming OR .so not refreshed in APK)
+    - preferred: A (fewer assumptions, more proximate)
+  - verification_to_disprove_B:
+    - Downloaded run #10 release APK (3.5 MB)
+    - Extracted lib/arm64-v8a/libapk_detector.so from inside APK
+    - nm -D + objdump -T confirm 4 symbols present with _data_ segment
+    - matches exactly: Java_id_zai_apkdetector_data_NativeBridge_{diffApks,engineVersion,listSignatures,scanApk}
+  - decision: NO CODE FIX — user must be running stale run #9 APK
+ci_runs: none (no push)
+remediation_for_user:
+  - "adb uninstall id.zai.apkdetector (full uninstall — clears cached .so)"
+  - "Download fresh apk-detector-release-apk.zip from https://github.com/hoshiyomiX/apk-detector/actions/runs/30124197001"
+  - "adb install <path-to/app-release-unsigned.apk>"
+  - "Launch app — PickerScreen should render without crash"
+next_step: User to perform clean reinstall (uninstall first, then install fresh APK from run #10). If crash persists AFTER clean reinstall, then we have a real bug to investigate (R8 class renaming, JNI OnLoad issue, etc.) — send me a fresh crash log + confirm the APK sha256 matches what's on run #10.
