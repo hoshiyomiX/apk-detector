@@ -314,3 +314,102 @@ next_step: |
   
   If a different crash appears, capture new logs and continue the fix-then-
   push-then-verify cycle.
+
+---
+last_phase: DELIVER
+task: Pivot fix — panic=unwind so existing catch_unwind actually catches miniz_oxide panics (crash persisted after commit fecec2c9)
+complexity: Standard
+task_type: Coding
+continuation: YES (5th fix in APK Detector series — pivots from fecec2c9 which didn't resolve the crash)
+files_modified:
+  - rust/Cargo.toml (line 38: panic=abort → panic=unwind + explanatory comment)
+traceability: IMPL-005 (Cargo.toml profile change), IMPL-006 (commit + push + CI poll)
+phase_trace: IDLE→SPECIFY→PLAN(PIVOT)→IMPLEMENT→VERIFY→DELIVER
+
+pivot: YES
+  from: catch_unwind as defense-in-depth (commit fecec2c9)
+  trigger: User reports same crash persists after fix — "Problem masih persist, analisa dan temukan root cause lalu fix it"
+  to: Set panic=unwind in [profile.release] so existing catch_unwind actually works
+  reason: With panic=abort, std::panic::catch_unwind is a NO-OP — the process aborts directly. catch_unwind requires panic=unwind. This is documented Rust behavior.
+
+proximate_cause_triage: |
+  Symptom: Same crash log persists after commit fecec2c9 (which added catch_unwind).
+  
+  Candidates:
+    A: User tested with old APK (cached .so) — possible but user explicitly said "Problem masih persist"
+    B: panic=abort in release profile nullifies catch_unwind — ADOPTED
+       - Q1 (1-hop): YES — directly in rust/Cargo.toml line 38
+       - Q2 (≤2 assumptions): YES — 1 assumption (release profile has panic=abort, verifiable on line 38)
+       - Q3 (fixes user request): YES — with panic=unwind, catch_unwind catches the panic
+    C: Different code path triggers same panic — REJECTED (grep confirmed only one DeflateDecoder call site)
+    D: miniz_oxide FFI aborts bypass catch_unwind — DEFERRED (would require deeper investigation if B fails)
+  
+  Preferred: B (proximate, parsimonious, in-scope)
+  Verification: grep confirmed panic=abort on line 38 of rust/Cargo.toml. No overrides in .cargo/config.toml or CI RUSTFLAGS.
+
+fix_summary: |
+  IMPL-005: Changed `panic = "abort"` to `panic = "unwind"` in rust/Cargo.toml [profile.release].
+            Added a 9-line comment explaining:
+              - Why this MUST stay "unwind" (catch_unwind in zip_reader.rs depends on it)
+              - What happens with "abort" (catch_unwind is a no-op, process aborts)
+              - The size cost (~5-15% predicted, actual +1.3%)
+              - Warning: do NOT change back to "abort" without removing catch_unwind
+                and verifying miniz_oxide never panics on real-world APK input
+  
+  IMPL-006: Committed as 0febcbe, pushed to origin/main, CI run #14 succeeded.
+
+ci_iterations: 1
+  - Run #14 (commit 0febcbe): SUCCESS on first try
+    - apk-detector-debug-apk: 15.82 MB (was 16.5 MB in run #13)
+    - apk-detector-release-apk: 3.51 MB (was 3.65 MB in run #13)
+    - apk-detector-native-libs: 870 KB (was 859 KB in run #13 — +11 KB / +1.3%)
+    - Size delta negligible — unwind tables compressed well with the rest of the .so
+
+size_analysis: |
+  Predicted size cost: 5-15% increase in .so due to unwind tables.
+  Actual size cost: +11 KB (+1.3%) on native-libs zip.
+  Why prediction was high:
+    - strip = true already removes most debug info
+    - LTO + opt-level=z aggressively strip unused code
+    - The personality function for unwind is small
+    - .so is already compressed (deflate) in the APK, so unwind tables compress well
+  Release APK and debug APK actually got SMALLER (R8 nondeterminism, not related to panic setting).
+
+discoveries: NONE (no same-surface bugs found during this fix)
+
+scope_drift: NONE
+
+git_state:
+  branch: main
+  local_head: 0febcbe (matches remote)
+  remote_main: 0febcbe
+  ci_run: #14 (success)
+  prior_fix_commit: fecec2c9 (still in place — catch_unwind code is correct, just needed panic=unwind to activate)
+
+next_step: |
+  User should:
+    1. Download the NEW apk-detector-release-apk.zip from CI run #14:
+       https://github.com/hoshiyomiX/apk-detector/actions/runs/30132500277
+    2. IMPORTANT: Uninstall the old APK first to clear cached .so:
+       adb uninstall id.zai.apkdetector
+    3. Install the new release APK:
+       adb install <path-to/app-release-unsigned.apk>
+    4. Re-test scanning the same APK that previously crashed.
+  
+  Expected behavior now (with BOTH fixes active — CDH sizes + catch_unwind + panic=unwind):
+    - If the APK's deflate streams are well-formed: scan completes normally
+    - If a particular entry's deflate stream is malformed: scanApk returns an
+      ApkError::Zip("deflate panic for <name>: <msg>") instead of crashing.
+      The Kotlin UI should display this error gracefully.
+  
+  If the SAME crash STILL persists after this fix:
+    - The catch_unwind is being bypassed at the FFI level (rare but possible)
+    - Next step would be to switch to `zip` crate's high-level reader which
+      validates deflate headers before decompression (the Fallback Approach
+      from the PLAN)
+    - OR replace flate2::read::DeflateDecoder with a manual
+      flate2::Decompress + Status loop that checks for corruption before
+      the panic-triggering code path
+  
+  Send me a fresh crash log if it persists — at that point we know it's
+  not panic=abort and we need to investigate deeper.
