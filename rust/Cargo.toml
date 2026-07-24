@@ -35,4 +35,13 @@ opt-level = "z"      # size-optimized for on-device
 lto = true
 codegen-units = 1
 strip = true
-panic = "abort"
+# MUST be "unwind" (not "abort"). apk-parser::zip_reader wraps deflate
+# decompression in std::panic::catch_unwind so that a malformed APK
+# produces an ApkError instead of crashing the JNI process. With
+# panic = "abort", catch_unwind is a no-op — the process aborts directly
+# and the app crashes. The size cost of unwind tables (~5-15%) is
+# acceptable for stability. Do NOT change back to "abort" without also
+# removing the catch_unwind in zip_reader.rs and verifying miniz_oxide
+# never panics on real-world APK input (it does — see commit fecec2c9
+# crash log: `assertion failed: n <= init_unfilled`).
+panic = "unwind"
