@@ -8,7 +8,7 @@
 //!
 //! All exported native methods are `extern "system"` (JNICALL on ARM/x86).
 
-use std::ffi::{CStr, c_char, c_int, c_void};
+use std::ffi::{c_char, c_int, c_void, CStr};
 use std::sync::OnceLock;
 
 use detector::{full_scan, ReportDiff};
@@ -21,7 +21,8 @@ static SIGS: OnceLock<Option<SigSet>> = OnceLock::new();
 
 fn sigs() -> Result<&'static SigSet, String> {
     let opt = SIGS.get_or_init(|| SigSet::load_embedded().ok());
-    opt.as_ref().ok_or_else(|| "embedded signature set failed to load".to_string())
+    opt.as_ref()
+        .ok_or_else(|| "embedded signature set failed to load".to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -213,16 +214,10 @@ pub(crate) struct JNINativeInterface {
 }
 
 type NewStringUTFFn = unsafe extern "system" fn(env: *mut c_void, bytes: *const c_char) -> jstring;
-type GetStringUTFCharsFn = unsafe extern "system" fn(
-    env: *mut c_void,
-    str_: jstring,
-    is_copy: *mut u8,
-) -> *const c_char;
-type ReleaseStringUTFCharsFn = unsafe extern "system" fn(
-    env: *mut c_void,
-    str_: jstring,
-    chars: *const c_char,
-);
+type GetStringUTFCharsFn =
+    unsafe extern "system" fn(env: *mut c_void, str_: jstring, is_copy: *mut u8) -> *const c_char;
+type ReleaseStringUTFCharsFn =
+    unsafe extern "system" fn(env: *mut c_void, str_: jstring, chars: *const c_char);
 
 /// JNI opaque types (mirror of jni-sys's lowercase aliases).
 #[allow(non_camel_case_types)]
@@ -258,7 +253,8 @@ unsafe fn jstr_to_string(env: JNIEnvPtr, jstr: jstring) -> Result<String, String
         return Err("GetStringUTFChars returned null".to_string());
     }
     let cstr = CStr::from_ptr(chars);
-    let s = cstr.to_str()
+    let s = cstr
+        .to_str()
         .map(|s| s.to_owned())
         .map_err(|e| format!("utf8: {}", e));
     (i._release_string_utf_chars)(env as *mut c_void, jstr, chars);
@@ -396,14 +392,19 @@ pub unsafe extern "system" fn Java_id_zai_apkdetector_NativeBridge_listSignature
     let mut json = String::from("[");
     let mut first = true;
     for r in sigs.rules() {
-        if !first { json.push(','); }
+        if !first {
+            json.push(',');
+        }
         first = false;
         json.push('{');
         json.push_str(&format!("\"id\":\"{}\"", json_escape(&r.id)));
         json.push_str(&format!(",\"name\":\"{}\"", json_escape(&r.name)));
         json.push_str(&format!(",\"category\":\"{}\"", r.category.as_str()));
         json.push_str(&format!(",\"severity\":\"{}\"", r.severity.as_str()));
-        json.push_str(&format!(",\"description\":\"{}\"", json_escape(&r.description)));
+        json.push_str(&format!(
+            ",\"description\":\"{}\"",
+            json_escape(&r.description)
+        ));
         json.push('}');
     }
     json.push(']');

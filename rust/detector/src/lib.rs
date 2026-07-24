@@ -19,8 +19,8 @@ pub mod play_integrity;
 pub mod report;
 pub mod root;
 
-pub use report::{Finding, Report, ScanOutcome};
 pub use diff::ReportDiff;
+pub use report::{Finding, Report, ScanOutcome};
 
 use std::io::{Read, Seek};
 
@@ -30,11 +30,7 @@ use signatures::SignatureSet;
 /// Convenience: scan an APK against every category, return a fully-rendered
 /// `Report`. The caller is responsible for `apk_path` being a real file
 /// (used only for display in the report).
-pub fn full_scan<R: Read + Seek>(
-    apk_path: &str,
-    apk: &mut Apk<R>,
-    sigs: &SignatureSet,
-) -> Report {
+pub fn full_scan<R: Read + Seek>(apk_path: &str, apk: &mut Apk<R>, sigs: &SignatureSet) -> Report {
     let mut report = Report::new(apk_path);
     report.signature_count = sigs.len();
 
@@ -45,9 +41,7 @@ pub fn full_scan<R: Read + Seek>(
         }
     }
     // APK file size approximation: sum of all entry uncompressed sizes
-    report.apk_size_bytes = apk.entries().iter()
-        .map(|e| e.uncompressed_size)
-        .sum();
+    report.apk_size_bytes = apk.entries().iter().map(|e| e.uncompressed_size).sum();
 
     // Run each detector. Each pulls its slice of rules + scans.
     let dex_cap = 10; // first 10 DEX files (multidex safety)
@@ -62,4 +56,3 @@ pub fn full_scan<R: Read + Seek>(
 
     report
 }
-

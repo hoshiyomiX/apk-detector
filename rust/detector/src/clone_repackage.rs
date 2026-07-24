@@ -14,15 +14,18 @@ pub fn scan<R: Read + Seek>(
     findings: &mut Vec<Finding>,
     dex_cap: usize,
 ) {
-    let rules: Vec<_> = sigs.by_category(Category::CloneRepackage)
+    let rules: Vec<_> = sigs
+        .by_category(Category::CloneRepackage)
         .iter()
         .map(|&i| &sigs.rules()[i])
         .collect();
-    let dex_rules: Vec<_> = rules.iter()
+    let dex_rules: Vec<_> = rules
+        .iter()
         .filter(|r| r.evidence_location == EvidenceLocation::DexString)
         .copied()
         .collect();
-    let manifest_rules: Vec<_> = rules.iter()
+    let manifest_rules: Vec<_> = rules
+        .iter()
         .filter(|r| r.evidence_location == EvidenceLocation::Manifest)
         .copied()
         .collect();

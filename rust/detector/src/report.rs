@@ -96,13 +96,13 @@ impl Report {
         let _ = writeln!(md, "|---|---:|---|");
         for (cat, finds) in self.by_category() {
             let count = finds.len();
-            let highest = finds.iter()
+            let highest = finds
+                .iter()
                 .map(|f| f.severity)
                 .max_by_key(|s| severity_rank(*s))
                 .map(|s| s.as_str())
                 .unwrap_or("—");
-            let _ = writeln!(md, "| {} | {} | {} |",
-                category_label(cat), count, highest);
+            let _ = writeln!(md, "| {} | {} | {} |", category_label(cat), count, highest);
         }
         let _ = writeln!(md);
 
@@ -114,18 +114,29 @@ impl Report {
             let _ = writeln!(md);
         } else {
             for (cat, finds) in self.by_category() {
-                let _ = writeln!(md, "### {} ({} finding{})",
-                    category_label(cat), finds.len(),
-                    if finds.len() == 1 { "" } else { "s" });
+                let _ = writeln!(
+                    md,
+                    "### {} ({} finding{})",
+                    category_label(cat),
+                    finds.len(),
+                    if finds.len() == 1 { "" } else { "s" }
+                );
                 let _ = writeln!(md);
                 // Sort findings within category by severity desc, then by rule id
                 let mut sorted: Vec<&Finding> = finds.clone();
-                sorted.sort_by(|a, b|
-                    severity_rank(b.severity).cmp(&severity_rank(a.severity))
-                        .then_with(|| a.rule_id.cmp(&b.rule_id)));
+                sorted.sort_by(|a, b| {
+                    severity_rank(b.severity)
+                        .cmp(&severity_rank(a.severity))
+                        .then_with(|| a.rule_id.cmp(&b.rule_id))
+                });
                 for f in sorted {
-                    let _ = writeln!(md, "**{} {}** `{}`",
-                        f.severity.emoji(), f.severity.as_str().to_uppercase(), f.rule_id);
+                    let _ = writeln!(
+                        md,
+                        "**{} {}** `{}`",
+                        f.severity.emoji(),
+                        f.severity.as_str().to_uppercase(),
+                        f.rule_id
+                    );
                     let _ = writeln!(md, ": {}", f.rule_name);
                     let _ = writeln!(md);
                     let _ = writeln!(md, "- Evidence: `{}`", truncate_for_md(&f.evidence, 200));

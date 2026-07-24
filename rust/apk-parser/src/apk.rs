@@ -41,7 +41,9 @@ pub struct Apk<R: Read + Seek> {
 
 impl<R: Read + Seek> Apk<R> {
     pub fn open(reader: R) -> Result<Self, ApkError> {
-        Ok(Self { zip: ZipReader::open(reader)? })
+        Ok(Self {
+            zip: ZipReader::open(reader)?,
+        })
     }
 
     /// List every entry in the APK.
@@ -61,10 +63,11 @@ impl<R: Read + Seek> Apk<R> {
 
     /// Convenience: list all `classes*.dex` entries (multidex-aware).
     pub fn dex_entries(&self) -> Vec<&ApkEntry> {
-        self.zip.entries().iter()
+        self.zip
+            .entries()
+            .iter()
             .filter(|e| {
-                e.name == "classes.dex"
-                    || e.name.starts_with("classes") && e.name.ends_with(".dex")
+                e.name == "classes.dex" || e.name.starts_with("classes") && e.name.ends_with(".dex")
             })
             .collect()
     }
@@ -73,7 +76,10 @@ impl<R: Read + Seek> Apk<R> {
     pub fn native_libs(&mut self) -> Result<Vec<NativeLib>, ApkError> {
         // Collect candidate entries first to release the immutable borrow before
         // we call `self.zip.read(...)` (which takes &mut self).
-        let candidates: Vec<(String, String, u64)> = self.zip.entries().iter()
+        let candidates: Vec<(String, String, u64)> = self
+            .zip
+            .entries()
+            .iter()
             .filter_map(|e| {
                 if !e.name.starts_with("lib/") || !e.name.ends_with(".so") {
                     return None;
@@ -83,7 +89,11 @@ impl<R: Read + Seek> Apk<R> {
                 if parts.len() != 3 {
                     return None;
                 }
-                Some((parts[1].to_string(), parts[2].to_string(), e.uncompressed_size))
+                Some((
+                    parts[1].to_string(),
+                    parts[2].to_string(),
+                    e.uncompressed_size,
+                ))
             })
             .collect();
 
@@ -99,7 +109,12 @@ impl<R: Read + Seek> Apk<R> {
             } else {
                 None
             };
-            out.push(NativeLib { abi, filename, uncompressed_size, arch });
+            out.push(NativeLib {
+                abi,
+                filename,
+                uncompressed_size,
+                arch,
+            });
         }
         Ok(out)
     }

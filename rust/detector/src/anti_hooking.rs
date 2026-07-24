@@ -15,15 +15,18 @@ pub fn scan<R: Read + Seek>(
     findings: &mut Vec<Finding>,
     dex_cap: usize,
 ) {
-    let rules: Vec<_> = sigs.by_category(Category::AntiHooking)
+    let rules: Vec<_> = sigs
+        .by_category(Category::AntiHooking)
         .iter()
         .map(|&i| &sigs.rules()[i])
         .collect();
-    let dex_rules: Vec<_> = rules.iter()
+    let dex_rules: Vec<_> = rules
+        .iter()
         .filter(|r| r.evidence_location == EvidenceLocation::DexString)
         .copied()
         .collect();
-    let native_rules: Vec<_> = rules.iter()
+    let native_rules: Vec<_> = rules
+        .iter()
         .filter(|r| r.evidence_location == EvidenceLocation::NativeLibName)
         .copied()
         .collect();

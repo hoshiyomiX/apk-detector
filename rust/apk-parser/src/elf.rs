@@ -6,10 +6,10 @@
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ElfArch {
-    Arm32,    // armeabi-v7a
-    Arm64,    // arm64-v8a
-    X86,      // x86
-    X86_64,   // x86_64
+    Arm32,  // armeabi-v7a
+    Arm64,  // arm64-v8a
+    X86,    // x86
+    X86_64, // x86_64
     Mips,
     Mips64,
     Unknown,

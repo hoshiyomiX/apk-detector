@@ -24,12 +24,10 @@ pub fn scan_dex_strings<R: std::io::Read + std::io::Seek>(
     let mut all_strings: Vec<String> = Vec::new();
     for dex_name in &dex_to_scan {
         match apk.read(dex_name) {
-            Ok(bytes) => {
-                match apk_parser::DexStringTable::parse(&bytes) {
-                    Ok(tbl) => all_strings.extend(tbl.strings),
-                    Err(_) => continue,
-                }
-            }
+            Ok(bytes) => match apk_parser::DexStringTable::parse(&bytes) {
+                Ok(tbl) => all_strings.extend(tbl.strings),
+                Err(_) => continue,
+            },
             Err(_) => continue,
         }
     }
@@ -41,16 +39,21 @@ pub fn scan_dex_strings<R: std::io::Read + std::io::Seek>(
     for rule in rules {
         for needle in &rule.patterns {
             // case-sensitive substring scan
-            let hits: Vec<&String> = all_strings.iter()
+            let hits: Vec<&String> = all_strings
+                .iter()
                 .filter(|s| s.contains(needle.as_str()))
                 .collect();
             if !hits.is_empty() {
-                let evidence = hits.iter()
+                let evidence = hits
+                    .iter()
                     .take(3) // cap evidence at 3 hits per rule
                     .map(|s| s.as_str())
                     .collect::<Vec<_>>()
                     .join("`, `");
-                findings.push(finding_from_rule(rule, format!("DEX string match: `{}`", evidence)));
+                findings.push(finding_from_rule(
+                    rule,
+                    format!("DEX string match: `{}`", evidence),
+                ));
                 break; // one finding per rule, even if multiple patterns match
             }
         }
@@ -106,11 +109,13 @@ pub fn scan_native_lib_names<R: std::io::Read + std::io::Seek>(
     let libs = apk.native_libs()?;
     for rule in rules {
         for needle in &rule.patterns {
-            let hit: Vec<&apk_parser::NativeLib> = libs.iter()
+            let hit: Vec<&apk_parser::NativeLib> = libs
+                .iter()
                 .filter(|l| l.filename.contains(needle.as_str()))
                 .collect();
             if !hit.is_empty() {
-                let evidence = hit.iter()
+                let evidence = hit
+                    .iter()
                     .take(3)
                     .map(|l| format!("lib/{}/{}", l.abi, l.filename))
                     .collect::<Vec<_>>()
@@ -133,7 +138,8 @@ pub fn scan_zip_entries<R: std::io::Read + std::io::Seek>(
     let names: Vec<&str> = apk.entries().iter().map(|e| e.name.as_str()).collect();
     for rule in rules {
         for needle in &rule.patterns {
-            let hit: Vec<&str> = names.iter()
+            let hit: Vec<&str> = names
+                .iter()
                 .copied()
                 .filter(|n| n.contains(needle.as_str()))
                 .collect();

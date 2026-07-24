@@ -36,9 +36,8 @@ impl SignatureSet {
         let entries: &[(&'static str, &'static str)] = inline_rules!();
         let mut rules = Vec::new();
         for (file, content) in entries {
-            let parsed: Vec<DetectionRule> = serde_yaml::from_str(content).map_err(|e| {
-                SignatureSetError::Yaml { file, source: e }
-            })?;
+            let parsed: Vec<DetectionRule> = serde_yaml::from_str(content)
+                .map_err(|e| SignatureSetError::Yaml { file, source: e })?;
             rules.extend(parsed);
         }
         if rules.is_empty() {
@@ -55,18 +54,31 @@ impl SignatureSet {
             by_category.entry(r.category).or_default().push(i);
             by_id.insert(r.id.clone(), i);
         }
-        Self { rules, by_category, by_id }
+        Self {
+            rules,
+            by_category,
+            by_id,
+        }
     }
 
-    pub fn rules(&self) -> &[DetectionRule] { &self.rules }
+    pub fn rules(&self) -> &[DetectionRule] {
+        &self.rules
+    }
     pub fn by_category(&self, c: Category) -> &[usize] {
-        self.by_category.get(&c).map(|v| v.as_slice()).unwrap_or(&[])
+        self.by_category
+            .get(&c)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
     }
     pub fn by_id(&self, id: &str) -> Option<&DetectionRule> {
         self.by_id.get(id).map(|&i| &self.rules[i])
     }
-    pub fn len(&self) -> usize { self.rules.len() }
-    pub fn is_empty(&self) -> bool { self.rules.is_empty() }
+    pub fn len(&self) -> usize {
+        self.rules.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.rules.is_empty()
+    }
 }
 
 /// Macro: expands to a slice of `("filename.yaml", include_str!("yaml/filename.yaml"))`
@@ -74,14 +86,29 @@ impl SignatureSet {
 macro_rules! inline_rules {
     () => {
         &[
-            ("root.yaml",                 include_str!("../yaml/root.yaml")),
-            ("play_integrity.yaml",       include_str!("../yaml/play_integrity.yaml")),
-            ("mtd_rasp.yaml",             include_str!("../yaml/mtd_rasp.yaml")),
-            ("app_hardening.yaml",        include_str!("../yaml/app_hardening.yaml")),
-            ("anti_tamper.yaml",          include_str!("../yaml/anti_tamper.yaml")),
-            ("anti_hooking.yaml",         include_str!("../yaml/anti_hooking.yaml")),
-            ("anti_emulator.yaml",        include_str!("../yaml/anti_emulator.yaml")),
-            ("clone_repackage.yaml",      include_str!("../yaml/clone_repackage.yaml")),
+            ("root.yaml", include_str!("../yaml/root.yaml")),
+            (
+                "play_integrity.yaml",
+                include_str!("../yaml/play_integrity.yaml"),
+            ),
+            ("mtd_rasp.yaml", include_str!("../yaml/mtd_rasp.yaml")),
+            (
+                "app_hardening.yaml",
+                include_str!("../yaml/app_hardening.yaml"),
+            ),
+            ("anti_tamper.yaml", include_str!("../yaml/anti_tamper.yaml")),
+            (
+                "anti_hooking.yaml",
+                include_str!("../yaml/anti_hooking.yaml"),
+            ),
+            (
+                "anti_emulator.yaml",
+                include_str!("../yaml/anti_emulator.yaml"),
+            ),
+            (
+                "clone_repackage.yaml",
+                include_str!("../yaml/clone_repackage.yaml"),
+            ),
         ]
     };
 }
@@ -95,8 +122,11 @@ mod tests {
     fn all_eight_categories_present() {
         let s = SignatureSet::load_embedded().expect("embedded rules load");
         for cat in crate::ALL_CATEGORIES {
-            assert!(!s.by_category(*cat).is_empty(),
-                "category {:?} has zero rules", cat);
+            assert!(
+                !s.by_category(*cat).is_empty(),
+                "category {:?} has zero rules",
+                cat
+            );
         }
     }
 

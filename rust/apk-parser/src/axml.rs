@@ -35,11 +35,13 @@ const RES_XML_CDATA_TYPE: u16 = 0x0104;
 
 // Attribute field indices (AOSP ATTR_IX_*). Each field is a 4-byte unit
 // in the attribute array.
+#[allow(dead_code)] // documents AOSP layout; consumed by future attribute readers
 const ATTR_IX_NS: usize = 0;
 const ATTR_IX_NAME: usize = 1;
+#[allow(dead_code)] // documents AOSP layout; consumed by future attribute readers
 const ATTR_IX_VALUE: usize = 2; // rawValue (string pool index when type=string)
-const ATTR_IX_TYPE: usize = 3;  // Res_value (size:u16, res0:u8, dataType:u8, data:u32)
-const ATTR_IX_DATA: usize = 4;  // data field of Res_value (after the u32 of ATTR_IX_TYPE)
+const ATTR_IX_TYPE: usize = 3; // Res_value (size:u16, res0:u8, dataType:u8, data:u32)
+const ATTR_IX_DATA: usize = 4; // data field of Res_value (after the u32 of ATTR_IX_TYPE)
 
 const STRING_POOL_FLAG_UTF8: u32 = 1 << 8;
 
@@ -65,12 +67,12 @@ impl BinaryXml {
 
     /// Quick accessor: the `package` attribute on the root `<manifest>`.
     pub fn package(&self) -> Option<&str> {
-        self.elements.first()
-            .and_then(|e| {
-                e.attrs.iter()
-                    .find(|(k, _)| k == "package")
-                    .map(|(_, v)| v.as_str())
-            })
+        self.elements.first().and_then(|e| {
+            e.attrs
+                .iter()
+                .find(|(k, _)| k == "package")
+                .map(|(_, v)| v.as_str())
+        })
     }
 
     /// All `<uses-permission android:name="..." />` values.
@@ -88,7 +90,8 @@ impl BinaryXml {
 
     /// `<application android:name="..."/>` (the Application subclass).
     pub fn application_name(&self) -> Option<&str> {
-        self.elements.iter()
+        self.elements
+            .iter()
             .find(|e| e.tag == "application")
             .and_then(|e| e.attrs.iter().find(|(k, _)| k == "name"))
             .map(|(_, v)| v.as_str())
@@ -96,7 +99,8 @@ impl BinaryXml {
 
     /// All `<meta-data android:name="..."/>` values (used by SDK init).
     pub fn meta_data_names(&self) -> Vec<&str> {
-        self.elements.iter()
+        self.elements
+            .iter()
             .filter(|e| e.tag == "meta-data")
             .filter_map(|e| e.attrs.iter().find(|(k, _)| k == "name"))
             .map(|(_, v)| v.as_str())
@@ -172,7 +176,11 @@ impl<'a> Parser<'a> {
         let mut out = Vec::with_capacity(string_count);
         for off in offsets {
             let p = strings_start + off;
-            let s = if is_utf8 { self.read_utf8(p)? } else { self.read_utf16(p)? };
+            let s = if is_utf8 {
+                self.read_utf8(p)?
+            } else {
+                self.read_utf16(p)?
+            };
             out.push(s);
         }
         Ok(out)
@@ -272,7 +280,11 @@ impl<'a> Parser<'a> {
                     String::new()
                 }
             } else if attr_type == 0x12 {
-                if attr_data != 0 { "true".to_string() } else { "false".to_string() }
+                if attr_data != 0 {
+                    "true".to_string()
+                } else {
+                    "false".to_string()
+                }
             } else {
                 attr_data.to_string()
             };
@@ -292,7 +304,12 @@ impl<'a> Parser<'a> {
         if p + 4 > self.b.len() {
             return Err(AxmlError::Truncated(p + 4));
         }
-        Ok(u32::from_le_bytes([self.b[p], self.b[p + 1], self.b[p + 2], self.b[p + 3]]))
+        Ok(u32::from_le_bytes([
+            self.b[p],
+            self.b[p + 1],
+            self.b[p + 2],
+            self.b[p + 3],
+        ]))
     }
 }
 

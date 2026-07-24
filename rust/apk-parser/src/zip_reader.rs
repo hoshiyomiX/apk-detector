@@ -110,7 +110,11 @@ impl<R: Read + Seek> ZipReader<R> {
             lfh_offsets.push(lfh_offset);
         }
 
-        Ok(Self { reader, entries, lfh_offsets })
+        Ok(Self {
+            reader,
+            entries,
+            lfh_offsets,
+        })
     }
 
     pub fn entries(&self) -> &[ApkEntry] {
@@ -119,7 +123,10 @@ impl<R: Read + Seek> ZipReader<R> {
 
     /// Read a single entry's decompressed bytes.
     pub fn read(&mut self, name: &str) -> Result<Vec<u8>, ApkError> {
-        let idx = self.entries.iter().position(|e| e.name == name)
+        let idx = self
+            .entries
+            .iter()
+            .position(|e| e.name == name)
             .ok_or_else(|| ApkError::NotFound(name.to_string()))?;
         let lfh_off = self.lfh_offsets[idx];
 
@@ -137,7 +144,8 @@ impl<R: Read + Seek> ZipReader<R> {
         let uncompressed_size = u32_le(&lhdr[18..22]) as u64;
         let name_len = u16_le(&lhdr[22..24]) as usize;
         let extra_len = u16_le(&lhdr[24..26]) as usize;
-        self.reader.seek(SeekFrom::Current((name_len + extra_len) as i64))?;
+        self.reader
+            .seek(SeekFrom::Current((name_len + extra_len) as i64))?;
 
         let mut compressed = vec![0u8; compressed_size as usize];
         self.reader.read_exact(&mut compressed)?;

@@ -48,3 +48,6 @@ captures/
 *.swp
 *~
 Thumbs.db
+
+# ─── Local agent artifacts (not part of project) ─────────────────────────
+tool-results/

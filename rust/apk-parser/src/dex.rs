@@ -34,7 +34,7 @@ impl DexStringTable {
         if bytes.len() < 0x70 {
             return Err(DexError::Truncated(bytes.len()));
         }
-        if &bytes[0..4] != DEX_MAGIC {
+        if bytes[0..4] != DEX_MAGIC {
             return Err(DexError::BadMagic);
         }
         // bytes[4..7] = version "035", "037", "038", "039", "040"
@@ -63,7 +63,7 @@ impl DexStringTable {
             if data_off >= bytes.len() {
                 continue; // corrupt entry — skip
             }
-            let (len, header_n) = uleb128(&bytes, data_off)?;
+            let (len, header_n) = uleb128(bytes, data_off)?;
             let str_start = data_off + header_n;
             let str_end = str_start + len;
             if str_end > bytes.len() {
@@ -79,8 +79,15 @@ impl DexStringTable {
 
     /// Scan all strings for ones containing `needle` (case-sensitive substring).
     pub fn find_containing(&self, needle: &str) -> Vec<&str> {
-        self.strings.iter()
-            .filter_map(|s| if s.contains(needle) { Some(s.as_str()) } else { None })
+        self.strings
+            .iter()
+            .filter_map(|s| {
+                if s.contains(needle) {
+                    Some(s.as_str())
+                } else {
+                    None
+                }
+            })
             .collect()
     }
 }

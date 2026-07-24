@@ -15,7 +15,8 @@ pub fn scan<R: Read + Seek>(
     findings: &mut Vec<Finding>,
     dex_cap: usize,
 ) {
-    let dex_rules: Vec<_> = sigs.by_category(Category::PlayIntegrity)
+    let dex_rules: Vec<_> = sigs
+        .by_category(Category::PlayIntegrity)
         .iter()
         .filter_map(|&i| {
             let r = &sigs.rules()[i];
