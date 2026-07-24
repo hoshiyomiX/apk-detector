@@ -168,3 +168,34 @@ artifact_verification:
   - apk-detector-release-apk: app-release-unsigned.apk lib/ directory contains libapk_detector.so for all 3 ABIs
   - apk-detector-debug-apk: 15.79 MB (unchanged)
 next_step: User to download fresh apk-detector-release-apk from https://github.com/hoshiyomiX/apk-detector/actions/runs/30105670082 — install on Infinix X695C (Android 11) or any Android 7.0+ device — verify PickerScreen loads without crashing. If a NEW crash appears (e.g., NoSuchMethodError on scanApk), that indicates R8 stripped a JNI method name — the ProGuard keep rules should prevent this but only device testing confirms. v0.2 dynamic analysis still pending.
+
+---
+last_phase: DELIVER
+task: Fix crash log https://bin.kv2.dev/~6a63ca4b0f0ca400138db47c — JNI symbol name missing _data_ segment
+complexity: Standard
+task_type: Coding
+files_modified:
+  - rust/jni-bridge/src/api.rs (4 symbol renames: Java_id_zai_apkdetector_NativeBridge_<m> -> Java_id_zai_apkdetector_data_NativeBridge_<m>)
+  - rust/jni-bridge/src/lib.rs (doc comments updated to match new symbol names)
+phase_trace: IDLE→SPECIFY→PLAN→IMPLEMENT→VERIFY→DELIVER
+traceability:
+  - FIX-001: Rename 4 #[no_mangle] JNI symbols in api.rs + update lib.rs doc comments — ✓
+  - FIX-002: Push commit 47490b7, CI run #10 (run_id 30124197001) completed/success — ✓
+  - FIX-003: Verified .so exports via `nm -D libapk_detector.so` — all 4 symbols present with _data_ segment — ✓
+pivot: NONE
+scope_drift: NONE
+proximate_cause_triage:
+  - symptom: "UnsatisfiedLinkError: No implementation found for NativeBridge.engineVersion() (tried Java_id_zai_apkdetector_data_NativeBridge_engineVersion and Java_id_zai_apkdetector_data_NativeBridge_engineVersion__)"
+  - candidate: "Rust exports symbols WITHOUT _data_ segment — JNI name-mangling requires the .data package segment"
+  - Q1_within_1_hop: YES (directly in #[no_mangle] fn name in api.rs vs JVM lookup name in stacktrace)
+  - Q2_assumptions: 1 (JNI C symbol format: Java_<package-with-underscores>_<class>_<method> — well-documented ABI spec)
+  - Q3_fixes_request: YES (crash log explicitly shows the expected symbol name with _data_)
+  - decision: FIX NOW — 4-line symbol rename
+  - rabbit_hole_avoided: did NOT investigate JNI_OnLoad, RegisterNatives, R8 stripping, Kotlin @JvmStatic, or classloader behavior — the crash log already showed both tried names, and the Rust source confirmed the symbols were missing _data_
+ci_runs:
+  - "#10 (run_id 30124197001, sha 47490b7): SUCCESS — 3 artifacts uploaded"
+artifact_symbol_verification:
+  - library: libapk_detector.so (arm64-v8a, 532 KB)
+  - nm -D output: 4 T (text/defined) symbols matching Java_id_zai_apkdetector_data_NativeBridge_{diffApks,engineVersion,listSignatures,scanApks}
+  - all 4 match Kotlin class FQN id.zai.apkdetector.data.NativeBridge
+next_step: User to download fresh apk-detector-release-apk from https://github.com/hoshiyomiX/apk-detector/actions/runs/30124197001 — install on Infinix X695C (Android 11) or any Android 7.0+ device — PickerScreen should now render with engineVersion() resolving correctly. If a NEW crash appears (e.g., NoSuchMethodError on scanApk, or NoSuchFieldError), send me the new log. If scan completes successfully, v0.1 is working end-to-end.
