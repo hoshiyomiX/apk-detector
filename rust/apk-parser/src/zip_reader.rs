@@ -173,9 +173,8 @@ impl<R: Read + Seek> ZipReader<R> {
                 // ZIP entries use raw DEFLATE (no zlib header) — use
                 // `inflate::inflate_bytes`, NOT `inflate_bytes_zlib`.
                 // Returns Err on malformed input; never panics, never SIGSEGVs.
-                inflate::inflate_bytes(&compressed).map_err(|e| {
-                    ApkError::Zip(format!("deflate error for {}: {}", name, e))
-                })
+                inflate::inflate_bytes(&compressed)
+                    .map_err(|e| ApkError::Zip(format!("deflate error for {}: {}", name, e)))
             }
             m => Err(ApkError::Zip(format!("unsupported compression: {}", m))),
         }
