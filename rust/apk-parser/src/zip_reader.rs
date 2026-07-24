@@ -186,7 +186,10 @@ impl<R: Read + Seek> ZipReader<R> {
                         } else {
                             "unknown panic".to_string()
                         };
-                        Err(ApkError::Zip(format!("deflate panic for {}: {}", name, msg)))
+                        Err(ApkError::Zip(format!(
+                            "deflate panic for {}: {}",
+                            name, msg
+                        )))
                     }
                 }
             }
