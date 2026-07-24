@@ -12,6 +12,9 @@ secrets/
 PAT
 PAT.txt
 
+# ─── Agent-local helper scripts (not part of project deliverable) ────────
+scripts/
+
 # ─── Skill / agent tooling (internal) ────────────────────────────────────
 skills/
 node_modules/
