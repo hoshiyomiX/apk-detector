@@ -231,3 +231,86 @@ remediation_for_user:
   - "adb install <path-to/app-release-unsigned.apk>"
   - "Launch app — PickerScreen should render without crash"
 next_step: User to perform clean reinstall (uninstall first, then install fresh APK from run #10). If crash persists AFTER clean reinstall, then we have a real bug to investigate (R8 class renaming, JNI OnLoad issue, etc.) — send me a fresh crash log + confirm the APK sha256 matches what's on run #10.
+
+---
+last_phase: DELIVER
+task: Fix crash log "Engine version: 0.1.0 / scanApk called / assertion failed: n <= init_unfilled / corrupt deflate stream"
+complexity: Standard
+task_type: Coding
+continuation: YES (4th fix in APK Detector series — follows UnsatisfiedLinkError fix from prior session)
+files_modified:
+  - rust/apk-parser/src/zip_reader.rs (read() function: CDH sizes + catch_unwind)
+traceability: IMPL-001 (CDH sizes), IMPL-002 (catch_unwind), IMPL-003 (manual review), IMPL-004 (commit+push+CI)
+phase_trace: IDLE→SPECIFY→PLAN→IMPLEMENT→VERIFY→DELIVER
+
+crash_root_cause: |
+  miniz_oxide (rust_backend of flate2) panics with `assertion failed: n <= init_unfilled`
+  when fed a truncated or garbage deflate bit-stream. flate2 wraps this as
+  `corrupt deflate stream`.
+  
+  zip_reader.rs::read() was reading compressed_size/uncompressed_size from
+  the Local File Header (LFH). LFH sizes can be:
+    - zero (when data-descriptor flag bit 3 is set, common in aapt2-built APKs)
+    - stale/wrong (when produced by streaming writers or repackaging tools)
+  The Central Directory Header (CDH) is authoritative. Reading LFH sizes
+  with stale/wrong values caused a truncated read -> DeflateDecoder was
+  fed partial deflate bytes -> miniz_oxide panicked -> JNI process crashed.
+
+proximate_cause_triage: |
+  Candidates considered:
+    A: Wrong decoder type (DeflateDecoder vs ZlibDecoder) — REJECTED (ZIP method=8 = raw DEFLATE)
+    B: LFH compressed_size=0 (data descriptor) — REJECTED (would yield empty Vec, no panic)
+    C: LFH sizes stale while CDH is correct — ADOPTED (1 assumption, 1-hop, in-scope)
+    D: Upstream miniz_oxide bug with read_to_end reallocation — DEFERRED (not user-fixable)
+    E: Missing catch_unwind — ADOPTED (defense-in-depth, same surface, 0 assumptions)
+  Preferred: C + E (combined, same surface — zip_reader.rs::read())
+
+fix_summary: |
+  IMPL-001: Use self.entries[idx] (CDH-derived) sizes and method instead of
+            re-reading from the LFH. The LFH is still parsed, but only to
+            advance past the name + extra fields to reach the data.
+  IMPL-002: Wrap the deflate read_to_end in
+            std::panic::catch_unwind(AssertUnwindSafe(...)) so any future
+            malformed-deflate input becomes an ApkError::Zip instead of
+            crashing the JNI process.
+
+ci_iterations: 3
+  - Run #11 (commit 274ceb60): FAILED — cargo fmt flagged long format! line
+  - Run #12 (commit f3962828): FAILED — clippy flagged Result<usize> vs Result<()> pattern
+  - Run #13 (commit fecec2c9): SUCCESS — 3 artifacts uploaded
+    - apk-detector-debug-apk: 16.5 MB
+    - apk-detector-release-apk: 3.65 MB (R8 minified)
+    - apk-detector-native-libs: 859 KB (libapk_detector.so for arm64-v8a, armeabi-v7a, x86_64)
+
+discoveries:
+  - bug: rustfmt line-wrap requirement for format!() calls exceeding line width
+    found_while: pushing IMPL-001/IMPL-002 fix
+    surface: same (zip_reader.rs)
+    action: fix-now
+    outcome: fixed in commit f3962828
+  - bug: read_to_end returns Result<usize>, not Result<()> — pattern Ok(Ok(())) wrong
+    found_while: clippy run on commit f3962828
+    surface: same (zip_reader.rs)
+    action: fix-now
+    outcome: fixed in commit fecec2c9
+
+scope_drift: NONE
+pivot: NONE
+
+git_state:
+  branch: main
+  local_head: fecec2c9
+  remote_main: fecec2c9
+  ci_run: #13 (success)
+
+next_step: |
+  User should download the new apk-detector-release-apk (or debug-apk) from
+  CI run #13 and re-test scanning the APK that previously crashed. The
+  expected behavior now:
+    - If the APK's deflate streams are well-formed: scan completes normally
+    - If a particular entry's deflate stream is genuinely malformed: scanApk
+      returns an ApkError instead of crashing the app — UI should display
+      the error gracefully (verify Kotlin UI handles null/error return)
+  
+  If a different crash appears, capture new logs and continue the fix-then-
+  push-then-verify cycle.
