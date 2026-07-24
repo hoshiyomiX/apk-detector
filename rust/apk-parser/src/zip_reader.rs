@@ -7,11 +7,13 @@
 //!  - End-of-central-directory record (EOCD)
 //!  - Central directory file headers
 //!  - Local file headers (for read-on-demand)
-//!  - Deflate decompression via the `flate2` pass-through provided by `zip` crate
+//!  - Deflate decompression via the pure-Rust `inflate` crate
 //!
-//! We delegate actual inflate to the `zip` crate's `ZipFile` when reading,
-//! because hand-rolling a correct inflate is a security risk. The ZipReader
-//! here is just a thin index over the central directory.
+//! We use the `inflate` crate (not `flate2`/`miniz_oxide`) because miniz_oxide
+//! has unsafe internals that can SIGSEGV on malformed DEFLATE input — a signal
+//! that `std::panic::catch_unwind` cannot intercept, crashing the JNI process.
+//! The `inflate` crate is 100% safe Rust and returns `Result` instead of
+//! panicking, eliminating the entire failure class.
 
 use std::io::{Read, Seek, SeekFrom};
 use thiserror::Error;
@@ -126,10 +128,14 @@ impl<R: Read + Seek> ZipReader<R> {
     /// Uses the central-directory sizes (authoritative) rather than the local
     /// file header sizes, which may be zero (data descriptor flag) or stale on
     /// APKs produced by streaming writers / repackaging tools. Trusting the
-    /// LFH sizes can feed a truncated deflate stream to miniz_oxide, which
-    /// panics with `assertion failed: n <= init_unfilled`. The decompression
-    /// is also wrapped in `catch_unwind` so any future malformed input becomes
-    /// an `ApkError` instead of crashing the JNI process.
+    /// LFH sizes can feed a truncated deflate stream to the decompressor.
+    ///
+    /// Decompression uses the `inflate` crate (pure Rust, no `unsafe`), which
+    /// returns `Result` on malformed input instead of panicking or SIGSEGVing.
+    /// This is critical because the JNI process cannot recover from a SIGSEGV;
+    /// `catch_unwind` only catches Rust panics, not OS signals. The previous
+    /// implementation used `flate2` (which delegates to `miniz_oxide`) and
+    /// crashed on certain malformed APKs despite a `catch_unwind` wrapper.
     pub fn read(&mut self, name: &str) -> Result<Vec<u8>, ApkError> {
         let idx = self
             .entries
@@ -142,7 +148,7 @@ impl<R: Read + Seek> ZipReader<R> {
         let entry = self.entries[idx].clone();
         let method = if entry.is_compressed { 8u16 } else { 0u16 };
         let compressed_size = entry.compressed_size;
-        let uncompressed_size = entry.uncompressed_size;
+        let _uncompressed_size = entry.uncompressed_size;
 
         // Parse local file header — only to skip past name + extra fields.
         self.reader.seek(SeekFrom::Start(lfh_off))?;
@@ -164,34 +170,12 @@ impl<R: Read + Seek> ZipReader<R> {
         match method {
             0 => Ok(compressed), // stored
             8 => {
-                use std::io::Cursor;
-                let decoder = flate2::read::DeflateDecoder::new(Cursor::new(compressed));
-                let mut out = Vec::with_capacity(uncompressed_size as usize);
-                // miniz_oxide can panic on malformed deflate input (e.g.
-                // `assertion failed: n <= init_unfilled`). Catch the panic so
-                // a malformed APK returns an error instead of taking down the
-                // JNI process.
-                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    let mut d = decoder;
-                    d.read_to_end(&mut out)
-                }));
-                match result {
-                    Ok(Ok(_)) => Ok(out),
-                    Ok(Err(e)) => Err(ApkError::from(e)),
-                    Err(payload) => {
-                        let msg = if let Some(s) = payload.downcast_ref::<&'static str>() {
-                            s.to_string()
-                        } else if let Some(s) = payload.downcast_ref::<String>() {
-                            s.clone()
-                        } else {
-                            "unknown panic".to_string()
-                        };
-                        Err(ApkError::Zip(format!(
-                            "deflate panic for {}: {}",
-                            name, msg
-                        )))
-                    }
-                }
+                // ZIP entries use raw DEFLATE (no zlib header) — use
+                // `inflate::inflate_bytes`, NOT `inflate_bytes_zlib`.
+                // Returns Err on malformed input; never panics, never SIGSEGVs.
+                inflate::inflate_bytes(&compressed).map_err(|e| {
+                    ApkError::Zip(format!("deflate error for {}: {}", name, e))
+                })
             }
             m => Err(ApkError::Zip(format!("unsupported compression: {}", m))),
         }

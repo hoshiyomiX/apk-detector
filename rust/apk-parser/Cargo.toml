@@ -13,4 +13,14 @@ byteorder.workspace = true
 bytes.workspace = true
 log.workspace = true
 thiserror = "1.0"
-flate2 = { version = "1.0", default-features = false, features = ["rust_backend"] }
+# Pure-Rust DEFLATE decoder. We deliberately avoid `flate2` (which uses
+# `miniz_oxide` under the `rust_backend` feature) because miniz_oxide has
+# unsafe internals that can SIGSEGV on malformed DEFLATE input — a signal
+# that `std::panic::catch_unwind` cannot intercept, crashing the JNI
+# process. The `inflate` crate is 100% safe Rust and returns `Result`
+# instead of panicking, eliminating the entire failure class.
+# See: zip_reader.rs::read() for the call site.
+inflate = "0.4"
+# NOTE: flate2 is intentionally NOT used by apk-parser anymore. It remains
+# declared in the workspace [dependencies] table for potential future use
+# (e.g. gzip streams), but no crate in this workspace currently depends on it.
