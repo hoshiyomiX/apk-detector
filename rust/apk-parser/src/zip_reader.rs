@@ -883,10 +883,7 @@ mod tests {
     ///
     /// Layout:
     ///   [LFH for "hello.txt"][data "hi"][CDH for "hello.txt"][EOCD]
-    fn build_zip_one_stored_entry(
-        name: &str,
-        data: &[u8],
-    ) -> Vec<u8> {
+    fn build_zip_one_stored_entry(name: &str, data: &[u8]) -> Vec<u8> {
         let crc = crc32(data);
         let lfh_offset: u32 = 0;
         let mut bytes = Vec::new();
@@ -1001,11 +998,8 @@ mod tests {
     /// to exercise the entry-advance arithmetic.
     #[test]
     fn test_multi_entry_zip_walks_cd() {
-        let files: &[(&str, &[u8])] = &[
-            ("a.txt", b"alpha"),
-            ("b.txt", b"beta"),
-            ("c.txt", b"gamma"),
-        ];
+        let files: &[(&str, &[u8])] =
+            &[("a.txt", b"alpha"), ("b.txt", b"beta"), ("c.txt", b"gamma")];
         let mut bytes = Vec::new();
         let mut cd_offsets: Vec<(u32, &str, &[u8])> = Vec::new();
 
