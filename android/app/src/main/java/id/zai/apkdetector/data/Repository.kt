@@ -23,7 +23,7 @@ class Repository(private val dao: ScanDao) {
     suspend fun scan(context: Context, source: ApkSource): ScanResult {
         val path = when (source) {
             is ApkSource.Path -> source.path
-            is ApkSource.Uri -> copyUriToCacheExt(context, source.uri, "scan")
+            is ApkSource.Uri -> copyUriToCacheExt(context, source.uri, "scan")?.absolutePath
         } ?: return ScanResult.Err("Could not resolve APK path from $source")
 
         val result = try {
