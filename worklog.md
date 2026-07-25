@@ -848,3 +848,122 @@ deferred_discoveries:
     or similar, NOT "no EOCD found" (because the classic EOCD is still present in ZIP64
     archives, just with 0xFFFF/0xFFFFFFFF sentinels). ZIP64 is extremely rare for APKs
     (Android's apkbuilder doesn't produce ZIP64), so this is deferred.
+
+---
+Task ID: cdh-fix+apks-support
+Agent: main (stellar-trails v9.8.0, Standard tier, Coding type, Continuation=YES)
+Task: Fix 'bad CDH at 25526272' crash + add .apks (BundleTool ZIP-of-APKs) container support
+
+Work Log:
+- Read prior worklog: previous fix (EOCD off-by-one, commit 2232e40, CI #22 success) is in place.
+- Investigated zip_reader.rs::open() — found EOCD search accepted first EOCD_SIG match without verifying comment_len field. False-positive EOCD signatures (in comments, file body, or APK Signing Block) produced bogus cd_offset, yielding 'bad CDH at <cd_offset>' on first CDH read.
+- Implemented IMPL-001: EOCD verification — for each candidate, check abs_pos + 22 + comment_len == file_size before accepting.
+- Implemented IMPL-002: ZIP64 sentinel handling — if cd_entries / cd_size / cd_offset contains 0xFFFF / 0xFFFFFFFF sentinel, locate ZIP64 EOCD locator (sig 0x07064b50) 20 bytes before classic EOCD, read real values from ZIP64 EOCD record (sig 0x06064b50). Per-entry ZIP64 extra-field (header ID 0x0001) parsing for size sentinels.
+- Implemented IMPL-003: 'bad CDH' error now reports current_pos (where bad signature was actually found) plus cd_offset, cd_entries, found signature, and entry index — previously hardcoded cd_offset regardless of which entry failed.
+- Implemented IMPL-004: 6 new unit tests (test_eocd_in_comment_rejected, test_real_eocd_found_despite_body_false_positive, test_zip64_sentinel_in_cd_entries, test_zip64_sentinel_in_cd_offset, test_zip64_sentinel_without_locator_errors, test_bad_cdh_error_reports_current_position) + 4 existing tests = 10 total.
+- Implemented IMPL-005: Apk::open_any(reader, file_path) dispatcher detects .apks by extension, extracts base.apk into memory, opens inner APK. Type-erased via Box<dyn ReadSeek> (custom trait combining Read+Seek since Rust forbids dyn Read + Seek directly — E0225).
+- Implemented IMPL-006: JNI scanApk + diffApks (via scan_to_findings) route through open_any for transparent .apks handling. No API change.
+- Implemented IMPL-007: Kotlin PickerScreen + DiffScreen accept application/vnd.android.package-archive + application/zip + application/octet-stream MIME types. Repository.copyUriToCacheExt preserves source extension via OpenableColumns.DISPLAY_NAME query (a .apks saved as .apk would be parsed as regular APK and fail).
+
+ci_iterations: 4
+  - Run #24 (commit 4b0f536): FAIL — cargo fmt --check rejected multi-line if conditions, comment alignment, u64_le line wrapping
+  - Run #25 (commit 225126e): FAIL — clippy E0225 'only auto traits can be used as additional traits in a trait object' on Box<dyn Read + Seek>
+  - Run #26 (commit 0965087): FAIL — clippy::doc_lazy_continuation on '>4 GB' and '>65535 entries' in doc comment (interpreted as markdown quote)
+  - Run #27 (commit 0bdd823): FAIL — Kotlin compile error: Repository.kt:30, :38 'Argument type mismatch: actual type is Comparable<String & File> & Serializable, but String was expected' (when branches had String vs File? types)
+  - Run #28 (commit abfd045): SUCCESS — all 10 Rust tests pass, all 3 ABIs cross-compile, debug + release APKs build, release APK signed
+
+discoveries:
+  - bug: clippy E0225 — Box<dyn Read + Seek> forbidden because neither Read nor Seek is an auto trait
+    found_while: implementing .apks support (open_any dispatcher)
+    surface: same (apk.rs — the new code I just added)
+    action: fix-now
+    outcome: fixed in same iteration (commit 0965087 — added ReadSeek marker trait with blanket impl)
+  - bug: clippy::doc_lazy_continuation — '>4 GB' interpreted as markdown quote start
+    found_while: fixing E0225
+    surface: same (zip_reader.rs tests module doc comment)
+    action: fix-now
+    outcome: fixed in same iteration (commit 0bdd823 — rephrased to 'exceeding 4 GB')
+  - bug: Kotlin type mismatch — when branches had String vs File? types
+    found_while: fixing doc_lazy_continuation
+    surface: same (Repository.kt — the new code I just added)
+    action: fix-now
+    outcome: fixed in same iteration (commit abfd045 — added ?.absolutePath to Uri branch)
+
+scope_drift: NONE (all 3 discovered bugs were same-surface fixes to code I added in this iteration)
+
+pivot: NONE
+
+git_state:
+  branch: main
+  local_head: abfd045 (matches remote)
+  remote_main: abfd045
+  ci_run: #28 (success)
+  prior_fix_commit: 2232e40 (EOCD off-by-one — still in place, working as intended)
+
+root_cause_analysis:
+  symptom: "apk parse <path>: zip read error: bad CDH at 25526272"
+  proximate_cause: EOCD search accepted first EOCD_SIG match without verifying comment_len field
+  why_this_apk_failed: this APK's ZIP comment (or APK Signing Block, or file body) contained the 4-byte sequence 0x06054b50 by coincidence. The false-positive EOCD's cd_offset (25526272) pointed to non-CDH data, so the first CDH read returned a wrong signature and the parser failed with 'bad CDH at 25526272'.
+  why_previous_apks_worked: those APKs didn't have any false-positive EOCD_SIG in their last 22+65535 bytes, so the first match was the real EOCD.
+  verification: 6 new unit tests covering EOCD verification, ZIP64 sentinel handling, and accurate CDH error reporting. All 10 tests pass on CI #28.
+
+next_step: |
+  User should:
+    1. Download the NEW apk-detector-release-apk.zip from CI run #28:
+       https://github.com/hoshiyomiX/apk-detector/actions/runs/30141257318
+    2. CRITICAL: Uninstall the old APK first to clear cached .so:
+       adb uninstall id.zai.apkdetector
+       (The engine version string will change to "0.1.0+abfd045" — if it
+        still shows "0.1.0+2232e40" or older, you're running cached .so.)
+    3. Install the NEW release APK (it's signed, installable directly):
+       adb install app-release.apk
+    4. Re-test scanning the SAME APK that previously failed with "bad CDH at 25526272".
+       Expected: scan completes successfully now (EOCD verification rejects
+       false-positive EOCD signatures and finds the real one at end of file).
+    5. NEW FEATURE: Try scanning a .apks file (BundleTool output).
+       - Tap "Pick APK / .apks" button (label changed from "Pick APK")
+       - Document picker will now show .apks files alongside .apk files
+       - Pick a .apks — the engine will extract base.apk from the container
+         and scan it. The report will show the base.apk's defenses.
+    6. CHECK the "Engine version" log line:
+       - Should read "0.1.0+abfd045" (or similar SHA from this commit)
+       - If it reads "0.1.0+2232e40" or older → you're running the OLD build.
+         Uninstall and reinstall.
+
+  Expected behavior now (with all 3 fixes + .apks support):
+    - APKs with false-positive EOCD_SIG in comment/body/signing block: scan
+      completes normally (previously failed with "bad CDH at <cd_offset>")
+    - APKs >4 GB or with >65535 entries (ZIP64): scan completes normally
+      (previously would fail with bad CDH or seek-past-EOF IO error)
+    - .apks containers (BundleTool ZIP-of-APKs): scan completes by extracting
+      base.apk into memory and parsing it (previously: picker wouldn't show
+      .apks files, and even if forced, the parser would fail with bad CDH
+      because .apks structure is base.apk + splits + toc.pb, not a regular
+      APK layout)
+    - Regular .apk files: scan completes normally (no regression — all 4
+      pre-existing tests still pass)
+
+  If the APK STILL fails with "bad CDH at <X>" after this fix:
+    - The error message now includes the actual current_pos (where the bad
+      signature was found), cd_offset (where EOCD said CD starts), cd_entries,
+      and the found signature value. Use these to diagnose.
+    - If current_pos != cd_offset, the parser walked past some valid CDHs and
+      hit garbage at current_pos — likely a corrupt CD mid-archive.
+    - If current_pos == cd_offset (first CDH), the EOCD's cd_offset is wrong
+      — likely a streaming-writer APK with stale EOCD, or a genuinely corrupt
+      archive.
+    - Try opening the APK with `unzip -l` on a desktop to verify it's valid.
+
+deferred_discoveries:
+  - .xapk format: separate spec (used by APKPure), different container structure
+    (ZIP with manifest.json + APK files). Not handled. Would need separate
+    detection + extraction logic.
+  - Split APK scanning: .apks containers contain base.apk + splits/*.apk. Only
+    base.apk is scanned. If user wants combined scan across all splits, would
+    need to iterate and merge findings. Deferred — base.apk is sufficient for
+    defense-mechanism detection (splits typically contain only resources/code
+    for specific ABIs/locales, not defensive code).
+  - Content-based .apks detection: currently dispatches by file extension. A
+    file named "foo.bin" that's actually an .apks wouldn't be detected. Could
+    sniff by opening as ZIP and checking if first entry is *.apk. Deferred —
+    extension-based detection is sufficient for the SAF picker use case.
