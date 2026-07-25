@@ -326,8 +326,7 @@ pub unsafe extern "system" fn Java_id_zai_apkdetector_data_NativeBridge_scanApk(
         Err(e) => return return_error(env, &format!("path: {}", e)),
     };
 
-    let result =
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| scan_apk_body(&path)));
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| scan_apk_body(&path)));
     match result {
         Ok(Ok(md)) => return_string(env, &md),
         Ok(Err(e)) => return_error(env, &e),
