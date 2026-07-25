@@ -1,0 +1,15 @@
+[package]
+name = "apk-detector-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Host-side CLI for dissecting APKs with the detector engine (no Android required)"
+
+[[bin]]
+name = "apk-detector-cli"
+path = "src/main.rs"
+
+[dependencies]
+apk-parser = { path = "../apk-parser" }
+signatures = { path = "../signatures" }
+detector = { path = "../detector" }

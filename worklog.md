@@ -1182,3 +1182,120 @@ deferred_discoveries:
     callback on success — it just writes `result = ...` state, which is
     safe on a disposed composition (state writes no-op). So no fix needed.
     Logged for awareness.
+
+---
+Task ID: filter-block-restrict-octo
+Agent: main (stellar-trails v9.8.0, Standard tier, Coding type, Continuation=YES)
+Task: Filter jenis deteksi pada scanned apk, tampilkan yang hanya trigger block/restrict user karena tidak memenuhi kriteria deteksi tersebut. Gunakan OCTO apk sebagai target bedah & analisa locally terlebih dahulu.
+
+Work Log:
+- Read prior worklog: all parsing + freeze/FC fixes in place (commits 2232e40, abfd045, d357227, c650e9d). CI #33 green. Local HEAD was c291e6d (a worklog-only commit from prior session, not on remote).
+- SADC inline: pattern matches Trivy --severity, Snyk --severity-threshold, MobSF severity filters. Existing Severity enum + severity_rank() already support ranking — only filter helper + CLI entry point needed. No new external deps.
+- Located OCTO APK at /tmp/my-project/apk-analysis/unpacked/base.apk (127MB) + raw/app.apks (118MB). OCTO is CT Corp Digital Indonesia banking app — confirmed via drawable resources (ic_octo_cash_plus, ic_octo_cprot, custom_edit_text_octo) and referenced in rust/signatures/yaml/root.yaml comment ("common Android banking apps (OCTO, BCA, Mandiri)").
+- IMPL-001: Added Severity::is_blocking() to rust/signatures/src/types.rs — returns true for Medium | High | Critical (the threshold at which a finding actually blocks or restricts the user). Low/Info return false (bypassable/informational).
+- IMPL-002: Added Report::to_markdown_blocking_only(&self, sigs) to rust/detector/src/report.rs — same shape as existing to_markdown but filters findings via is_blocking(). Header clearly states "Block/Restrict Filter" + "showing only findings that would block or restrict the user (severity Medium / High / Critical)". Reports total/blocking/hidden counts in the Findings line.
+- IMPL-003: Added 6 unit tests in rust/detector/src/report.rs tests module — test_severity_is_blocking_threshold, test_blocking_filter_drops_info_and_low, test_blocking_filter_with_all_info_low_renders_header, test_blocking_filter_with_zero_findings_renders_header, test_blocking_filter_keeps_critical_only, test_full_report_unaffected_by_filter_addition (regression guard).
+- IMPL-004: Created rust/cli/Cargo.toml — new workspace member depending on apk-parser, signatures, detector. Binary name: apk-detector-cli.
+- IMPL-005: Created rust/cli/src/main.rs — hand-rolled arg parser (no clap dep), supports <APK_PATH> [--blocking-only] [--out <FILE>]. Wraps scan in std::panic::catch_unwind (mirrors JNI bridge panic safety). Handles edge cases: no args, missing file, unknown flag, --out without path — all exit 1 with diagnostic + usage.
+- IMPL-006: Added "cli" to workspace members in rust/Cargo.toml.
+- IMPL-007: cargo build -p apk-detector-cli --release — 577KB binary at target/release/apk-detector-cli.
+- IMPL-008: Ran OCTO full scan → /home/z/my-project/download/octo-full-report.md (6.7KB, 18 findings: 16 blocking + 2 LOW).
+- IMPL-009: Ran OCTO blocking-only scan → /home/z/my-project/download/octo-block-restrict-report.md (6.5KB, 16 findings shown, 2 LOW hidden). Also ran OCTO .apks bundle scan → /home/z/my-project/download/octo-apks-block-restrict-report.md (6.5KB, same 18 findings via .apks dispatch).
+- IMPL-010: cargo test --workspace --lib — 21/21 tests pass (13 apk-parser + 6 detector + 2 signatures + 0 jni-bridge).
+- IMPL-011: cargo fmt --check --all PASS, cargo clippy --workspace --all-targets -- -D warnings PASS (0 warnings).
+
+Bug found + fixed during IMPL:
+- Double-drain bug in to_markdown_blocking_only: summary loop called by_cat_blocking.remove(c) which drained the HashMap before the detail loop ran, causing all per-category detail sections to silently disappear. Tests caught it (test_blocking_filter_drops_info_and_low + test_blocking_filter_keeps_critical_only both failed on first run). Fix: changed summary loop to use .get(c) instead of .remove(c) so the map is still populated for the detail section. Added inline comment explaining the bug to prevent regression.
+
+ci_iterations: 0 (local verification only — push pending)
+  - Pre-push local verification (9 checks): all PASS
+    1. bash -n on all bash blocks: N/A (no bash blocks in code changes)
+    2. python3 -c blocks: N/A
+    3. grep patterns: N/A
+    4. banner version: N/A
+    5. tag check: N/A (no version bump)
+    6. clawhub registry: N/A (not a skill change)
+    7. workflow YAML: N/A (no workflow changes)
+    8. markdown fences: N/A (no markdown source changes)
+    9. post-push plan: will poll CI after push
+  - cargo fmt --check --all: PASS
+  - cargo clippy --workspace --all-targets -- -D warnings: PASS
+  - cargo test --all --no-default-features (CI-equivalent): 21/21 PASS
+  - cargo build -p apk-detector-cli --release: PASS (577KB binary)
+  - OCTO base.apk scan: PASS (18 findings, 16 blocking)
+  - OCTO .apks scan: PASS (18 findings, 16 blocking — .apks dispatch works)
+  - CLI edge cases: PASS (no args, missing file, unknown flag, --out without path — all exit 1 with diagnostic)
+
+discoveries:
+  - observation: rustfmt prefers single-line vec![make_finding(...)] when args fit under 100 chars
+    found_while: writing test fixtures with multi-line make_finding calls
+    surface: same (rust/detector/src/report.rs tests module I just added)
+    action: fix-now
+    outcome: fixed by running cargo fmt --all (auto-collapsed to single-line)
+  - bug: Double-drain bug in to_markdown_blocking_only (summary loop drained HashMap before detail loop)
+    found_while: running cargo test -p detector after first implementation
+    surface: same (rust/detector/src/report.rs to_markdown_blocking_only method I just added)
+    action: fix-now
+    outcome: fixed by changing .remove(c) to .get(c) in summary loop. Inline comment added to prevent regression. Tests now pass.
+
+scope_drift: NONE
+
+pivot: NONE
+
+git_state:
+  branch: main
+  local_head: c291e6d (one worklog-only commit ahead of remote c650e9d from prior session)
+  remote_main: c650e9d
+  ci_run: pending push (will be #34)
+  prior_fix_commits: 2232e40 (EOCD off-by-one) + abfd045 (EOCD comment_len + ZIP64 + .apks) + d357227 (CDH off-by-4) + c650e9d (freeze/FC fixes) — still in place, working as intended
+
+root_cause_analysis:
+  symptom: "User wants to filter detection types on scanned APK, show only those that trigger block/restrict user because they don't meet detection criteria. Use OCTO as target to dissect & analyze locally first."
+  proximate_cause: No filter mechanism existed in the detector — to_markdown rendered ALL findings regardless of severity. No CLI binary existed to run scans from Linux sandbox (only JNI bridge for Android).
+  why_octo_specifically: OCTO is a banking app (CT Corp Digital Indonesia) with comprehensive defense mechanisms — 18 findings across 6 of 8 categories. Ideal test target for verifying the filter behavior. Already pre-unpacked at /tmp/my-project/apk-analysis/ from prior session.
+  why_medium_threshold_for_block_restrict:
+    - Critical = "Actively blocks the user (kills process, calls home)" → definitely block
+    - High = "Detects even custom tooling; bypass requires significant expertise" → effectively restricts
+    - Medium = "Detects default tooling; bypass requires specific knowledge" → restricts
+    - Low = "bypassable by experienced users" → NOT a block/restrict
+    - Info = "informational only" → NOT a block/restrict
+  verification: 6 new unit tests + OCTO local scan confirm filter works. OCTO full report has 18 findings (16 blocking + 2 LOW); filtered report shows 16 findings and hides exactly the 2 LOW findings (root-check-ro-secure-prop, anti-emulator-build-manufacturer).
+
+OCTO analysis summary (16 block/restrict findings):
+  - Root Detection (1): root-check-su-binary (MEDIUM) — su binary path check
+  - Play Integrity (3): play-integrity-api-call (HIGH), play-integrity-manager-impl (HIGH), play-integrity-safety-net-legacy (MEDIUM) — full Play Integrity + legacy SafetyNet
+  - Anti-Tamper (4): anti-tamper-pm-get-signatures-v2 (HIGH), anti-tamper-self-integrity (HIGH), anti-tamper-signature-get-installed (HIGH), anti-tamper-dex-crc (MEDIUM) — signature + DEX CRC + self-integrity
+  - Anti-Hooking (1): anti-hook-frida-maps-scan (HIGH) — /proc/self/maps scan for Frida
+  - Anti-Emulator (6): anti-emulator-bluestacks (HIGH), anti-emulator-files (HIGH), anti-emulator-build-fingerprint (MEDIUM), anti-emulator-network (MEDIUM), anti-emulator-sensors (MEDIUM), anti-emulator-telephony (MEDIUM) — comprehensive emulator detection
+  - Clone/Repackage (1): clone-installer-source (MEDIUM) — installer source check
+  - Hidden by filter (2): root-check-ro-secure-prop (LOW), anti-emulator-build-manufacturer (LOW)
+  - Notable absence: 0 MTD/RASP findings (no Promon/OneSpan/Arxan/Guardsquare/Verimatrix) — OCTO uses Play Integrity + custom checks instead of commercial RASP SDKs
+
+next_step: |
+  User should:
+    1. Review the OCTO block/restrict report at /home/z/my-project/download/octo-block-restrict-report.md
+       (16 findings across 6 categories — comprehensive defense for a banking app)
+    2. Compare with full report at /home/z/my-project/download/octo-full-report.md
+       (18 findings — 2 additional LOW-severity findings hidden by filter)
+    3. If satisfied with the filter behavior, the next iteration should add a JNI export
+       scanApkBlockingOnly(path) to jni-bridge and a UI toggle in the Kotlin Compose app
+       so on-device users can apply the same filter from the Android app.
+    4. To re-run the analysis: /home/z/my-project/rust/target/release/apk-detector-cli
+       <apk-or-apks-path> --blocking-only --out <file.md>
+
+deferred_discoveries:
+  - JNI export scanApkBlockingOnly: not implemented. CLI is the immediate deliverable per
+    "locally terlebih dahulu". Next iteration should add the JNI export so the Android app
+    can call the same filter. Signature: Java_id_zai_apkdetector_data_NativeBridge_scanApkBlockingOnly
+    — same as scanApk but calls to_markdown_blocking_only instead of to_markdown.
+  - Kotlin Compose UI filter toggle: not implemented. Once JNI export exists, add a Switch
+    in ReportScreen or a toggle in PickerScreen "Show only block/restrict findings".
+  - .apks content-based detection: still dispatches by file extension only (unchanged from
+    prior iteration). Could sniff by opening as ZIP and checking if first entry is *.apk.
+  - Severity threshold customization: currently hardcoded to Medium+. Could be parameterized
+    via CLI flag (--threshold high) or YAML config. Low priority — current threshold matches
+    the user's "block/restrict" semantics precisely.
+  - Octo app package name not extracted: the full report header shows "**Size:** 159298425 bytes"
+    but no "**Package:**" line — the AXML parser didn't extract the package name from OCTO's
+    manifest. Could be a parser bug or OCTO uses a non-standard manifest format. Not blocking
+    the filter feature, but worth investigating in a future iteration.

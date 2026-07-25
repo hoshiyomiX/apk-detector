@@ -78,6 +78,23 @@ impl Severity {
             Severity::Critical => "🔴",
         }
     }
+
+    /// Returns true when a finding at this severity would actively **block
+    /// or restrict** the user — i.e., the detection criteria are strict
+    /// enough that a non-bypassing user cannot use the app normally.
+    ///
+    /// Threshold: `Medium` and above.
+    /// - `Critical` — "Actively blocks the user (kills process, calls home)"
+    /// - `High`     — "Detects even custom tooling; bypass requires significant expertise"
+    /// - `Medium`   — "Detects default tooling; bypass requires specific knowledge"
+    /// - `Low`      — bypassable by experienced users → NOT a block/restrict
+    /// - `Info`     — informational only → NOT a block/restrict
+    ///
+    /// Used by `Report::to_markdown_blocking_only` to filter the report
+    /// down to findings that actually impact the user.
+    pub fn is_blocking(&self) -> bool {
+        matches!(self, Severity::Medium | Severity::High | Severity::Critical)
+    }
 }
 
 /// Where in the APK to look for the evidence.

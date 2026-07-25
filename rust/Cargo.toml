@@ -5,6 +5,7 @@ members = [
     "signatures",
     "detector",
     "jni-bridge",
+    "cli",
 ]
 
 [workspace.package]
