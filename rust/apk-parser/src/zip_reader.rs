@@ -198,9 +198,7 @@ impl<R: Read + Seek> ZipReader<R> {
                 }));
                 match result {
                     Ok(Ok(bytes)) => Ok(bytes),
-                    Ok(Err(e)) => {
-                        Err(ApkError::Zip(format!("deflate error for {}: {}", name, e)))
-                    }
+                    Ok(Err(e)) => Err(ApkError::Zip(format!("deflate error for {}: {}", name, e))),
                     Err(payload) => {
                         let msg = if let Some(s) = payload.downcast_ref::<&'static str>() {
                             s.to_string()

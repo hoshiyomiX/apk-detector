@@ -423,7 +423,10 @@ pub unsafe extern "system" fn Java_id_zai_apkdetector_data_NativeBridge_engineVe
     // The SHA is captured at build time by build.rs and lets the user verify
     // which build is loaded on-device. If the crash log shows an OLD SHA,
     // the user is testing with a cached .so and must `adb uninstall` first.
-    return_string(env, &format!("{}+{}", env!("CARGO_PKG_VERSION"), env!("BUILD_SHA")))
+    return_string(
+        env,
+        &format!("{}+{}", env!("CARGO_PKG_VERSION"), env!("BUILD_SHA")),
+    )
 }
 
 // ---------------------------------------------------------------------------
