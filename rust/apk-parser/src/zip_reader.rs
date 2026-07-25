@@ -436,8 +436,8 @@ mod tests {
     //! "bad CDH at <cd_offset>" on the very first entry. The fix verifies
     //! each candidate EOCD via `abs_pos + 22 + comment_len == file_size`.
     //!
-    //! ZIP64 sentinel handling was added because APKs >4 GB or with
-    //! >65535 entries use 0xFFFF / 0xFFFFFFFF sentinels in the classic
+    //! ZIP64 sentinel handling was added because APKs exceeding 4 GB or
+    //! 65535 entries use 0xFFFF / 0xFFFFFFFF sentinels in the classic
     //! EOCD, with real values in a ZIP64 EOCD record (located via a
     //! ZIP64 EOCD locator 20 bytes before the classic EOCD).
 
