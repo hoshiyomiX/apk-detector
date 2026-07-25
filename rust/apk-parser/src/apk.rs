@@ -120,10 +120,22 @@ impl<R: Read + Seek> Apk<R> {
     }
 }
 
+/// Combined `Read + Seek` trait so we can use `Box<dyn ReadSeek>`. Rust
+/// forbids `dyn Read + Seek` directly (E0225: only auto traits can be
+/// used as additional traits in a trait object) because neither `Read`
+/// nor `Seek` is an auto trait. The standard workaround is a marker
+/// trait with both as supertraits plus a blanket impl.
+pub trait ReadSeek: Read + Seek {}
+
+// Blanket impl: any type that implements `Read + Seek` automatically
+// implements `ReadSeek`. This lets `Box<File>`, `Box<Cursor<Vec<u8>>>`,
+// etc. coerce to `Box<dyn ReadSeek>` via unsized coercion.
+impl<R: Read + Seek> ReadSeek for R {}
+
 /// Type-erased `Read + Seek` so we can return a single `Apk` type from
 /// `open_any` regardless of whether the source is a `File` (regular APK)
 /// or a `Cursor<Vec<u8>>` (base.apk extracted from an `.apks` container).
-pub type AnyReader = Box<dyn Read + Seek>;
+pub type AnyReader = Box<dyn ReadSeek>;
 
 /// Open an APK or `.apks` container transparently.
 ///
