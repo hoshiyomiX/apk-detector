@@ -1,6 +1,6 @@
 //! Top-level APK handle. Opens a ZIP, exposes typed accessors.
 
-use std::io::{Read, Seek};
+use std::io::{Cursor, Read, Seek};
 use thiserror::Error;
 
 use crate::elf::ElfArch;
@@ -117,5 +117,57 @@ impl<R: Read + Seek> Apk<R> {
             });
         }
         Ok(out)
+    }
+}
+
+/// Type-erased `Read + Seek` so we can return a single `Apk` type from
+/// `open_any` regardless of whether the source is a `File` (regular APK)
+/// or a `Cursor<Vec<u8>>` (base.apk extracted from an `.apks` container).
+pub type AnyReader = Box<dyn Read + Seek>;
+
+/// Open an APK or `.apks` container transparently.
+///
+/// `.apks` is the BundleTool output format: a ZIP whose entries are
+/// `base.apk`, `splits/*.apk`, and `toc.pb`. To scan an `.apks` we:
+///   1. Open the outer ZIP with our existing `ZipReader`.
+///   2. Find the `base.apk` entry (preferred name "base.apk"; fallback to
+///      any top-level `*.apk` entry — splits live under `splits/`).
+///   3. Read its decompressed bytes into memory.
+///   4. Open the inner APK with `ZipReader` again (recursively).
+///
+/// Detection is by file extension. Content-based detection (peek at first
+/// entry name) is deferred — extension is sufficient for the BundleTool
+/// output the user picks via the SAF picker.
+///
+/// For regular `.apk` files, this delegates to `Apk::open(reader)` without
+/// reading the whole file into memory.
+pub fn open_any(reader: AnyReader, file_path: &str) -> Result<Apk<AnyReader>, ApkError> {
+    let lower = file_path.to_ascii_lowercase();
+    if lower.ends_with(".apks") {
+        let mut zip = ZipReader::open(reader)?;
+        // Find base.apk. Prefer the exact name "base.apk"; fall back to any
+        // top-level entry ending in ".apk" (i.e., not under "splits/").
+        let base_name = zip
+            .entries()
+            .iter()
+            .find(|e| e.name == "base.apk")
+            .map(|e| e.name.clone())
+            .or_else(|| {
+                zip.entries()
+                    .iter()
+                    .find(|e| e.name.ends_with(".apk") && !e.name.contains('/'))
+                    .map(|e| e.name.clone())
+            })
+            .ok_or_else(|| {
+                ApkError::Zip(
+                    "apks container has no .apk entry (expected base.apk or top-level *.apk)"
+                        .to_string(),
+                )
+            })?;
+        let bytes = zip.read(&base_name)?;
+        let inner: AnyReader = Box::new(Cursor::new(bytes));
+        Apk::open(inner)
+    } else {
+        Apk::open(reader)
     }
 }

@@ -2,9 +2,8 @@ package id.zai.apkdetector.data
 
 import android.content.Context
 import android.net.Uri
-import androidx.documentfile.provider.DocumentFile
+import android.provider.OpenableColumns
 import java.io.File
-import java.io.FileOutputStream
 
 /**
  * Repository: high-level scan operations + history persistence.
@@ -24,7 +23,7 @@ class Repository(private val dao: ScanDao) {
     suspend fun scan(context: Context, source: ApkSource): ScanResult {
         val path = when (source) {
             is ApkSource.Path -> source.path
-            is ApkSource.Uri -> copyUriToCache(context, source.uri)
+            is ApkSource.Uri -> copyUriToCacheExt(context, source.uri, "scan")
         } ?: return ScanResult.Err("Could not resolve APK path from $source")
 
         val result = try {
@@ -61,19 +60,51 @@ class Repository(private val dao: ScanDao) {
 
     private suspend fun resolve(context: Context, source: ApkSource): String? = when (source) {
         is ApkSource.Path -> source.path
-        is ApkSource.Uri -> copyUriToCache(context, source.uri)
+        is ApkSource.Uri -> copyUriToCacheExt(context, source.uri, "diff")?.absolutePath
     }
+}
 
-    private fun copyUriToCache(context: Context, uri: Uri): String? {
-        return try {
-            val input = context.contentResolver.openInputStream(uri) ?: return null
-            val cacheFile = File(context.cacheDir, "scan_${System.currentTimeMillis()}.apk")
-            FileOutputStream(cacheFile).use { out -> input.copyTo(out) }
-            input.close()
-            cacheFile.absolutePath
-        } catch (t: Throwable) {
-            null
-        }
+/**
+ * Copy a content URI to a cache file, preserving the source extension.
+ *
+ * The Rust `open_any` dispatcher detects `.apks` containers by extension,
+ * so we MUST preserve the original extension (`.apk` or `.apks`) in the
+ * cache filename. A `.apks` saved as `picked_*.apk` would be parsed as a
+ * regular APK and fail with "bad CDH" or similar.
+ *
+ * Extension detection:
+ *  1. Query `OpenableColumns.DISPLAY_NAME` from the content resolver.
+ *  2. Extract the substring after the last `.`.
+ *  3. Sanitize: only allow alphanumeric, length 1–8 (covers `apk`, `apks`,
+ *     `xapk`, `zip`; rejects anything weird).
+ *  4. Default to `apk` if any step fails.
+ *
+ * Returns the cache File on success, or null on any I/O or query error.
+ */
+fun copyUriToCacheExt(context: Context, uri: Uri, prefix: String): File? {
+    return try {
+        val ext = queryDisplayName(context, uri)
+            ?.substringAfterLast('.', missingDelimiterValue = "")
+            ?.lowercase()
+            ?.takeIf { it.isNotEmpty() && it.length <= 8 && it.all { c -> c.isLetterOrDigit() } }
+            ?: "apk"
+        val cacheFile = File(context.cacheDir, "${prefix}_${System.currentTimeMillis()}.$ext")
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            cacheFile.outputStream().use { out -> input.copyTo(out) }
+        } ?: return null
+        cacheFile
+    } catch (_: Throwable) {
+        null
+    }
+}
+
+private fun queryDisplayName(context: Context, uri: Uri): String? {
+    return try {
+        context.contentResolver
+            .query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+    } catch (_: Throwable) {
+        null
     }
 }
 

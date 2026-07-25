@@ -17,7 +17,7 @@ pub mod dex;
 pub mod elf;
 pub mod zip_reader;
 
-pub use apk::{Apk, ApkEntry, ApkError, NativeLib};
+pub use apk::{open_any, Apk, ApkEntry, ApkError, NativeLib, AnyReader};
 pub use axml::{AxmlError, BinaryXml};
 pub use dex::DexStringTable;
 pub use elf::ElfArch;

@@ -15,6 +15,7 @@ import id.zai.apkdetector.ApkDetectorApp
 import id.zai.apkdetector.data.ApkSource
 import id.zai.apkdetector.data.NativeBridge
 import id.zai.apkdetector.data.ScanResult
+import id.zai.apkdetector.data.copyUriToCacheExt
 import id.zai.apkdetector.markdown.MarkdownRenderer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -39,16 +40,25 @@ fun DiffScreen(onBack: () -> Unit) {
         // Use ActivityResultContracts.OpenDocument via a launcher we create below.
     }
 
+    // MIME types: regular APK + ZIP (covers .apks) + octet-stream (fallback).
+    // Same rationale as PickerScreen — see comment there.
+    val pickMimes = arrayOf(
+        "application/vnd.android.package-archive",
+        "application/zip",
+        "application/octet-stream",
+    )
+
     val pickOld = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
         onResult = { uri ->
             if (uri != null) {
-                val cache = File(context.cacheDir, "diff_old_${System.currentTimeMillis()}.apk")
-                context.contentResolver.openInputStream(uri)?.use { input ->
-                    cache.outputStream().use { out -> input.copyTo(out) }
+                // Preserve source extension (.apk / .apks) so the Rust
+                // `open_any` dispatcher routes .apks through the container path.
+                val cache = copyUriToCacheExt(context, uri, "diff_old")
+                if (cache != null) {
+                    oldPath = cache.absolutePath
+                    oldLabel = cache.name
                 }
-                oldPath = cache.absolutePath
-                oldLabel = cache.name
             }
         },
     )
@@ -56,12 +66,11 @@ fun DiffScreen(onBack: () -> Unit) {
         ActivityResultContracts.OpenDocument(),
         onResult = { uri ->
             if (uri != null) {
-                val cache = File(context.cacheDir, "diff_new_${System.currentTimeMillis()}.apk")
-                context.contentResolver.openInputStream(uri)?.use { input ->
-                    cache.outputStream().use { out -> input.copyTo(out) }
+                val cache = copyUriToCacheExt(context, uri, "diff_new")
+                if (cache != null) {
+                    newPath = cache.absolutePath
+                    newLabel = cache.name
                 }
-                newPath = cache.absolutePath
-                newLabel = cache.name
             }
         },
     )
@@ -84,12 +93,12 @@ fun DiffScreen(onBack: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             OutlinedButton(
-                onClick = { pickOld.launch(arrayOf("application/vnd.android.package-archive")) },
+                onClick = { pickOld.launch(pickMimes) },
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("Pick OLD: $oldLabel") }
 
             OutlinedButton(
-                onClick = { pickNew.launch(arrayOf("application/vnd.android.package-archive")) },
+                onClick = { pickNew.launch(pickMimes) },
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("Pick NEW: $newLabel") }
 

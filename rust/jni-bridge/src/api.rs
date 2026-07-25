@@ -318,7 +318,13 @@ pub unsafe extern "system" fn Java_id_zai_apkdetector_data_NativeBridge_scanApk(
         Ok(f) => f,
         Err(e) => return return_error(env, &format!("open {}: {}", path, e)),
     };
-    let mut apk = match apk_parser::Apk::open(file) {
+    // `open_any` transparently handles both `.apk` (regular) and `.apks`
+    // (BundleTool ZIP-of-APKs container) — for `.apks` it extracts base.apk
+    // into memory and opens the inner APK. For regular `.apk` it stays as
+    // a streaming `File` read. Type-erased via `Box<dyn Read + Seek>` so
+    // both paths produce the same `Apk<AnyReader>` type.
+    let reader: apk_parser::AnyReader = Box::new(file);
+    let mut apk = match apk_parser::open_any(reader, &path) {
         Ok(a) => a,
         Err(e) => return return_error(env, &format!("apk parse {}: {}", path, e)),
     };
@@ -371,7 +377,10 @@ pub unsafe extern "system" fn Java_id_zai_apkdetector_data_NativeBridge_diffApks
 
 fn scan_to_findings(path: &str, sigs: &SigSet) -> Result<Vec<detector::Finding>, String> {
     let file = std::fs::File::open(path).map_err(|e| format!("open {}: {}", path, e))?;
-    let mut apk = apk_parser::Apk::open(file).map_err(|e| format!("apk parse {}: {}", path, e))?;
+    // Same dispatch as scanApk — handle `.apks` containers transparently.
+    let reader: apk_parser::AnyReader = Box::new(file);
+    let mut apk =
+        apk_parser::open_any(reader, path).map_err(|e| format!("apk parse {}: {}", path, e))?;
     let report = full_scan(path, &mut apk, sigs);
     Ok(report.findings)
 }

@@ -19,6 +19,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import id.zai.apkdetector.ApkDetectorApp
 import id.zai.apkdetector.data.ApkSource
+import id.zai.apkdetector.data.copyUriToCacheExt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -30,19 +31,23 @@ fun PickerScreen(
     val context = LocalContext.current
     var pendingPath by remember { mutableStateOf<String?>(null) }
 
-    // SAF picker for APK files (handles "permission denied" edge case on API 30+)
+    // SAF picker for APK and .apks files.
+    // - `application/vnd.android.package-archive` covers regular .apk files.
+    // - `application/zip` covers .apks (BundleTool output is a ZIP-of-APKs).
+    // - `application/octet-stream` is a fallback for .apks files registered
+    //   with a generic binary MIME type on some Android versions.
     val pickApk = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
         onResult = { uri ->
             if (uri != null) {
-                // Copy URI → cache file, then scan the cache path.
-                val cache = java.io.File(context.cacheDir, "picked_${System.currentTimeMillis()}.apk")
-                try {
-                    context.contentResolver.openInputStream(uri)?.use { input ->
-                        cache.outputStream().use { out -> input.copyTo(out) }
-                    }
+                // Copy URI → cache file with preserved extension, then scan.
+                // The Rust `open_any` dispatcher detects `.apks` containers
+                // by extension, so we MUST preserve `.apk`/`.apks` rather
+                // than hardcoding `.apk`.
+                val cache = copyUriToCacheExt(context, uri, "picked")
+                if (cache != null) {
                     pendingPath = cache.absolutePath
-                } catch (_: Throwable) { /* fall through */ }
+                }
             }
         },
     )
@@ -58,7 +63,7 @@ fun PickerScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Text(
-                "Pick an APK to analyze which defense mechanisms it ships.",
+                "Pick an APK or .apks (BundleTool) to analyze which defense mechanisms it ships.",
                 style = MaterialTheme.typography.bodyMedium,
             )
             Text(
@@ -68,12 +73,20 @@ fun PickerScreen(
             )
 
             Button(
-                onClick = { pickApk.launch(arrayOf("application/vnd.android.package-archive")) },
+                onClick = {
+                    pickApk.launch(
+                        arrayOf(
+                            "application/vnd.android.package-archive",
+                            "application/zip",
+                            "application/octet-stream",
+                        ),
+                    )
+                },
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Icon(Icons.Default.Search, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
-                Text("Pick APK")
+                Text("Pick APK / .apks")
             }
 
             OutlinedButton(onClick = onDiff, modifier = Modifier.fillMaxWidth()) {
