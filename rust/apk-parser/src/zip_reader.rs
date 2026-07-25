@@ -274,15 +274,11 @@ impl<R: Read + Seek> ZipReader<R> {
                     }
                     if header_id == ZIP64_EXTRA_HEADER_ID {
                         let mut p = data_start;
-                        if uncompressed_size == ZIP64_SENTINEL_U32
-                            && p + 8 <= data_end
-                        {
+                        if uncompressed_size == ZIP64_SENTINEL_U32 && p + 8 <= data_end {
                             uncompressed_size = u64_le(&extra[p..p + 8]);
                             p += 8;
                         }
-                        if compressed_size == ZIP64_SENTINEL_U32
-                            && p + 8 <= data_end
-                        {
+                        if compressed_size == ZIP64_SENTINEL_U32 && p + 8 <= data_end {
                             compressed_size = u64_le(&extra[p..p + 8]);
                             p += 8;
                         }
@@ -420,9 +416,7 @@ fn u32_le(b: &[u8]) -> u32 {
     u32::from_le_bytes([b[0], b[1], b[2], b[3]])
 }
 fn u64_le(b: &[u8]) -> u64 {
-    u64::from_le_bytes([
-        b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
-    ])
+    u64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]])
 }
 
 #[cfg(test)]
@@ -571,7 +565,8 @@ mod tests {
         // "jk" from "junk" = 0x6b6a = 27498 — bogus, would fail with
         // "bad CDH" on the resulting garbage cd_offset).
         let mut comment = Vec::new();
-        comment.extend_from_slice(&EOCD_SIG.to_le_bytes()); // false-positive sig at offset 22
+        // false-positive EOCD_SIG at offset 22 (start of comment)
+        comment.extend_from_slice(&EOCD_SIG.to_le_bytes());
         // Pad with 0xFF (NOT 0x00) so the false-positive's "comment_len"
         // field (at file offset 42..44 = comment[20..22]) reads 0xFFFF =
         // 65535. Then abs_pos(22) + 22 + 65535 = 65579 ≠ 44 = file_size,
@@ -607,7 +602,8 @@ mod tests {
         // 100 bytes of body containing EOCD_SIG at offset 50
         bytes.extend_from_slice(&[0u8; 50]);
         bytes.extend_from_slice(&EOCD_SIG.to_le_bytes());
-        bytes.extend_from_slice(&[0u8; 46]); // pad to 100 bytes total
+        // pad to 100 bytes total
+        bytes.extend_from_slice(&[0u8; 46]);
         // Real empty EOCD with no comment at the end
         bytes.extend_from_slice(&empty_zip_no_comment());
 
@@ -786,7 +782,8 @@ mod tests {
         // Construct: 4 bytes of garbage at offset 0 (where CD would be) +
         // an EOCD pointing to cd_offset=0 with cd_entries=1.
         let mut bytes = Vec::new();
-        bytes.extend_from_slice(&0xDEADBEEFu32.to_le_bytes()); // fake "CDH" — wrong sig
+        // fake "CDH" — wrong sig
+        bytes.extend_from_slice(&0xDEADBEEFu32.to_le_bytes());
         // EOCD pointing to it
         bytes.extend_from_slice(&EOCD_SIG.to_le_bytes());
         bytes.extend_from_slice(&0u16.to_le_bytes()); // disk
