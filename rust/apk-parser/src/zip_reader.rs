@@ -323,9 +323,13 @@ mod tests {
     fn test_open_too_small_returns_err() {
         let bytes = vec![0u8; 10]; // 10 bytes, way too small
         let cursor = Cursor::new(bytes);
-        let result = ZipReader::open(cursor);
-        assert!(result.is_err(), "10-byte file must error");
-        let msg = format!("{}", result.unwrap_err());
+        // Use `match` (not `unwrap_err`) because `unwrap_err` requires
+        // `T: Debug` and `ZipReader` doesn't implement `Debug` (the inner
+        // `R: Read + Seek` has no `Debug` bound).
+        let msg = match ZipReader::open(cursor) {
+            Ok(_) => panic!("10-byte file must error, but open() succeeded"),
+            Err(e) => format!("{}", e),
+        };
         assert!(
             msg.contains("file_size=10"),
             "error must mention file_size for diagnostics, got: {}",
@@ -338,9 +342,11 @@ mod tests {
     fn test_open_empty_file_returns_err() {
         let bytes: Vec<u8> = Vec::new();
         let cursor = Cursor::new(bytes);
-        let result = ZipReader::open(cursor);
-        assert!(result.is_err(), "empty file must error");
-        let msg = format!("{}", result.unwrap_err());
+        // See `test_open_too_small_returns_err` for why we use `match` here.
+        let msg = match ZipReader::open(cursor) {
+            Ok(_) => panic!("empty file must error, but open() succeeded"),
+            Err(e) => format!("{}", e),
+        };
         assert!(
             msg.contains("file_size=0"),
             "error must mention file_size=0, got: {}",
