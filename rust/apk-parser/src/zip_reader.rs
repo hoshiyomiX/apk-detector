@@ -234,15 +234,54 @@ impl<R: Read + Seek> ZipReader<R> {
                     CDH_SIG
                 )));
             }
+            // CDH layout (PKWARE APPNOTE.TXT 4.3.12). After the 4-byte
+            // signature, the remaining 42 bytes are read into `hdr`. Field
+            // offsets below are RELATIVE TO `hdr` (i.e., relative to the
+            // first byte AFTER the signature), NOT relative to the start of
+            // the CDH record. Mixing these up was the proximate cause of the
+            // "bad CDH at <offset>" and "io: failed to fill whole buffer"
+            // crashes: an earlier version of this code used offsets as if
+            // `hdr` included the 4-byte signature (every field read 4 bytes
+            // too early), so `name_len`/`extra_len`/`comment_len` actually
+            // read bytes from `uncompressed_size`/`compressed_size`, producing
+            // bogus lengths that made the parser skip past real CDH entries
+            // and land on garbage.
+            //
+            // hdr offset | CDH field
+            // -----------+--------------------------------
+            //  0..2      | version made by
+            //  2..4      | version needed to extract
+            //  4..6      | general purpose bit flag
+            //  6..8      | compression method
+            //  8..10     | last mod file time
+            // 10..12     | last mod file date
+            // 12..16     | CRC-32
+            // 16..20     | compressed size
+            // 20..24     | uncompressed size
+            // 24..26     | file name length (n)
+            // 26..28     | extra field length (m)
+            // 28..30     | file comment length (k)
+            // 30..32     | disk number start
+            // 32..34     | internal file attributes
+            // 34..38     | external file attributes
+            // 38..42     | relative offset of local header
             let mut hdr = [0u8; 42]; // rest of CDH (after sig)
             reader.read_exact(&mut hdr)?;
-            let _flags = u16_le(&hdr[0..2]);
-            let method = u16_le(&hdr[2..4]);
-            let mut compressed_size = u32_le(&hdr[12..16]) as u64;
-            let mut uncompressed_size = u32_le(&hdr[16..20]) as u64;
-            let name_len = u16_le(&hdr[20..22]) as usize;
-            let extra_len = u16_le(&hdr[22..24]) as usize;
-            let comment_len = u16_le(&hdr[24..26]) as usize;
+            let _version_made_by = u16_le(&hdr[0..2]);
+            let _version_needed = u16_le(&hdr[2..4]);
+            let _flags = u16_le(&hdr[4..6]);
+            let method = u16_le(&hdr[6..8]);
+            let _mod_time = u16_le(&hdr[8..10]);
+            let _mod_date = u16_le(&hdr[10..12]);
+            let _crc32 = u32_le(&hdr[12..16]);
+            let mut compressed_size = u32_le(&hdr[16..20]) as u64;
+            let mut uncompressed_size = u32_le(&hdr[20..24]) as u64;
+            let name_len = u16_le(&hdr[24..26]) as usize;
+            let extra_len = u16_le(&hdr[26..28]) as usize;
+            let comment_len = u16_le(&hdr[28..30]) as usize;
+            let _disk_number = u16_le(&hdr[30..32]);
+            let _internal_attrs = u16_le(&hdr[32..34]);
+            let _external_attrs = u32_le(&hdr[34..38]);
             let mut lfh_offset = u32_le(&hdr[38..42]) as u64;
 
             let mut name = vec![0u8; name_len];
@@ -292,7 +331,6 @@ impl<R: Read + Seek> ZipReader<R> {
                 }
             }
 
-            let _ = method; // method validated at read-time
             entries.push(ApkEntry {
                 name: String::from_utf8_lossy(&name).into_owned(),
                 compressed_size,
@@ -818,6 +856,239 @@ mod tests {
             msg.contains("found signature 0xdeadbeef"),
             "error must report found signature (hex lowercase), got: {}",
             msg
+        );
+    }
+
+    // ----------------------------------------------------------------
+    // CDH field-offset regression tests (added after the off-by-4 fix).
+    //
+    // History: every CDH field EXCEPT `lfh_offset` was being read 4 bytes
+    // too early because the code used offsets as if `hdr` (the 42-byte
+    // buffer AFTER the 4-byte signature) included the signature. This
+    // produced bogus `name_len`/`extra_len`/`comment_len` (actually reading
+    // bytes from `uncompressed_size`/`compressed_size`), which made the
+    // parser skip past real CDH entries and land on garbage — yielding
+    // "bad CDH at <offset>" on the second entry. For .apks containers,
+    // the same bug caused `compressed_size` (actually reading CRC-32) to
+    // produce a wrong byte count, making `read_exact` fail with
+    // "io: failed to fill whole buffer" when extracting base.apk.
+    //
+    // The 4 pre-existing tests above all use `cd_entries=0`, so the CDH
+    // loop never executes and the bug went undetected. The tests below
+    // construct real ZIPs with real CDH entries to exercise the parser.
+    // ----------------------------------------------------------------
+
+    /// Build a ZIP with one STORED (uncompressed) entry. Returns the full
+    /// ZIP bytes. Used to verify CDH field parsing end-to-end.
+    ///
+    /// Layout:
+    ///   [LFH for "hello.txt"][data "hi"][CDH for "hello.txt"][EOCD]
+    fn build_zip_one_stored_entry(
+        name: &str,
+        data: &[u8],
+    ) -> Vec<u8> {
+        let crc = crc32(data);
+        let lfh_offset: u32 = 0;
+        let mut bytes = Vec::new();
+
+        // Local file header (30 bytes + name)
+        bytes.extend_from_slice(&LFH_SIG.to_le_bytes());
+        bytes.extend_from_slice(&20u16.to_le_bytes()); // version needed
+        bytes.extend_from_slice(&0u16.to_le_bytes()); // flags
+        bytes.extend_from_slice(&0u16.to_le_bytes()); // method = STORED
+        bytes.extend_from_slice(&0u16.to_le_bytes()); // mod time
+        bytes.extend_from_slice(&0u16.to_le_bytes()); // mod date
+        bytes.extend_from_slice(&crc.to_le_bytes()); // CRC-32
+        bytes.extend_from_slice(&(data.len() as u32).to_le_bytes()); // compressed size
+        bytes.extend_from_slice(&(data.len() as u32).to_le_bytes()); // uncompressed size
+        bytes.extend_from_slice(&(name.len() as u16).to_le_bytes()); // name len
+        bytes.extend_from_slice(&0u16.to_le_bytes()); // extra len
+        bytes.extend_from_slice(name.as_bytes());
+        bytes.extend_from_slice(data);
+
+        let cd_offset = bytes.len() as u32;
+
+        // Central directory file header (46 bytes + name)
+        bytes.extend_from_slice(&CDH_SIG.to_le_bytes());
+        bytes.extend_from_slice(&20u16.to_le_bytes()); // version made by
+        bytes.extend_from_slice(&20u16.to_le_bytes()); // version needed
+        bytes.extend_from_slice(&0u16.to_le_bytes()); // flags
+        bytes.extend_from_slice(&0u16.to_le_bytes()); // method = STORED
+        bytes.extend_from_slice(&0u16.to_le_bytes()); // mod time
+        bytes.extend_from_slice(&0u16.to_le_bytes()); // mod date
+        bytes.extend_from_slice(&crc.to_le_bytes()); // CRC-32
+        bytes.extend_from_slice(&(data.len() as u32).to_le_bytes()); // compressed size
+        bytes.extend_from_slice(&(data.len() as u32).to_le_bytes()); // uncompressed size
+        bytes.extend_from_slice(&(name.len() as u16).to_le_bytes()); // name len
+        bytes.extend_from_slice(&0u16.to_le_bytes()); // extra len
+        bytes.extend_from_slice(&0u16.to_le_bytes()); // comment len
+        bytes.extend_from_slice(&0u16.to_le_bytes()); // disk number start
+        bytes.extend_from_slice(&0u16.to_le_bytes()); // internal attrs
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // external attrs
+        bytes.extend_from_slice(&lfh_offset.to_le_bytes()); // lfh offset
+        bytes.extend_from_slice(name.as_bytes());
+
+        let cd_size = (bytes.len() as u32) - cd_offset;
+
+        // EOCD
+        bytes.extend_from_slice(&EOCD_SIG.to_le_bytes());
+        bytes.extend_from_slice(&0u16.to_le_bytes()); // disk
+        bytes.extend_from_slice(&0u16.to_le_bytes()); // disk with CD
+        bytes.extend_from_slice(&1u16.to_le_bytes()); // entries on this disk
+        bytes.extend_from_slice(&1u16.to_le_bytes()); // total entries
+        bytes.extend_from_slice(&cd_size.to_le_bytes()); // CD size
+        bytes.extend_from_slice(&cd_offset.to_le_bytes()); // CD offset
+        bytes.extend_from_slice(&0u16.to_le_bytes()); // comment len
+
+        bytes
+    }
+
+    /// Standard CRC-32 (polynomial 0xEDB88320) — needed to make valid
+    /// ZIP entries. The parser doesn't verify CRC, but a real-world ZIP
+    /// will have correct CRCs and we want our synthetic test ZIPs to
+    /// match that shape.
+    fn crc32(data: &[u8]) -> u32 {
+        let mut crc: u32 = 0xFFFF_FFFF;
+        for &b in data {
+            crc ^= b as u32;
+            for _ in 0..8 {
+                if crc & 1 != 0 {
+                    crc = (crc >> 1) ^ 0xEDB88320;
+                } else {
+                    crc >>= 1;
+                }
+            }
+        }
+        !crc
+    }
+
+    /// A single STORED entry MUST be parsed correctly: the entry name,
+    /// compressed_size, uncompressed_size, method (STORED → is_compressed=false),
+    /// and lfh_offset must all match what we put into the CDH.
+    ///
+    /// This test FAILS with the off-by-4 bug because:
+    ///   - `name_len` reads `uncompressed_size`'s low 2 bytes (= 2, the
+    ///     length of "hi" — coincidentally small enough not to crash, but
+    ///     then the next read consumes 2 bytes of "hi" as the "name")
+    ///   - `compressed_size` reads CRC-32 (= some 4-byte value, not 2)
+    ///   - `is_compressed` is true because `method` reads `version_needed`
+    ///     (= 20) instead of method=0
+    #[test]
+    fn test_cdh_fields_read_correctly() {
+        let name = "hello.txt";
+        let data = b"hi";
+        let bytes = build_zip_one_stored_entry(name, data);
+        let cursor = Cursor::new(bytes);
+        let zip = ZipReader::open(cursor).expect("single-entry ZIP must open");
+        assert_eq!(zip.entries().len(), 1, "exactly one entry expected");
+        let e = &zip.entries()[0];
+        assert_eq!(e.name, name, "entry name must match");
+        assert_eq!(e.compressed_size, data.len() as u64, "compressed_size");
+        assert_eq!(e.uncompressed_size, data.len() as u64, "uncompressed_size");
+        assert!(
+            !e.is_compressed,
+            "STORED entry must have is_compressed=false (method=0)"
+        );
+    }
+
+    /// A multi-entry ZIP MUST walk the central directory entry-by-entry
+    /// without producing a "bad CDH" error. With the off-by-4 bug, the
+    /// first entry's misread `name_len`/`extra_len`/`comment_len` would
+    /// skip past several real CDHs and land on garbage, failing with
+    /// "bad CDH at <offset>" on entry #1.
+    ///
+    /// We use 3 entries with realistic sizes (small text files, STORED)
+    /// to exercise the entry-advance arithmetic.
+    #[test]
+    fn test_multi_entry_zip_walks_cd() {
+        let files: &[(&str, &[u8])] = &[
+            ("a.txt", b"alpha"),
+            ("b.txt", b"beta"),
+            ("c.txt", b"gamma"),
+        ];
+        let mut bytes = Vec::new();
+        let mut cd_offsets: Vec<(u32, &str, &[u8])> = Vec::new();
+
+        // Write all LFH+data first, recording CD offsets.
+        for (name, data) in files {
+            let lfh_offset = bytes.len() as u32;
+            let crc = crc32(data);
+            bytes.extend_from_slice(&LFH_SIG.to_le_bytes());
+            bytes.extend_from_slice(&20u16.to_le_bytes());
+            bytes.extend_from_slice(&0u16.to_le_bytes());
+            bytes.extend_from_slice(&0u16.to_le_bytes()); // STORED
+            bytes.extend_from_slice(&0u16.to_le_bytes());
+            bytes.extend_from_slice(&0u16.to_le_bytes());
+            bytes.extend_from_slice(&crc.to_le_bytes());
+            bytes.extend_from_slice(&(data.len() as u32).to_le_bytes());
+            bytes.extend_from_slice(&(data.len() as u32).to_le_bytes());
+            bytes.extend_from_slice(&(name.len() as u16).to_le_bytes());
+            bytes.extend_from_slice(&0u16.to_le_bytes());
+            bytes.extend_from_slice(name.as_bytes());
+            bytes.extend_from_slice(data);
+            cd_offsets.push((lfh_offset, name, data));
+        }
+
+        let cd_start = bytes.len() as u32;
+
+        // Write all CDHs.
+        for (lfh_offset, name, data) in &cd_offsets {
+            let crc = crc32(data);
+            bytes.extend_from_slice(&CDH_SIG.to_le_bytes());
+            bytes.extend_from_slice(&20u16.to_le_bytes()); // version made by
+            bytes.extend_from_slice(&20u16.to_le_bytes()); // version needed
+            bytes.extend_from_slice(&0u16.to_le_bytes()); // flags
+            bytes.extend_from_slice(&0u16.to_le_bytes()); // STORED
+            bytes.extend_from_slice(&0u16.to_le_bytes());
+            bytes.extend_from_slice(&0u16.to_le_bytes());
+            bytes.extend_from_slice(&crc.to_le_bytes());
+            bytes.extend_from_slice(&(data.len() as u32).to_le_bytes());
+            bytes.extend_from_slice(&(data.len() as u32).to_le_bytes());
+            bytes.extend_from_slice(&(name.len() as u16).to_le_bytes());
+            bytes.extend_from_slice(&0u16.to_le_bytes()); // extra
+            bytes.extend_from_slice(&0u16.to_le_bytes()); // comment
+            bytes.extend_from_slice(&0u16.to_le_bytes()); // disk
+            bytes.extend_from_slice(&0u16.to_le_bytes()); // internal
+            bytes.extend_from_slice(&0u32.to_le_bytes()); // external
+            bytes.extend_from_slice(&lfh_offset.to_le_bytes()); // lfh offset
+            bytes.extend_from_slice(name.as_bytes());
+        }
+
+        let cd_size = bytes.len() as u32 - cd_start;
+
+        // EOCD
+        bytes.extend_from_slice(&EOCD_SIG.to_le_bytes());
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        bytes.extend_from_slice(&3u16.to_le_bytes()); // 3 entries
+        bytes.extend_from_slice(&3u16.to_le_bytes());
+        bytes.extend_from_slice(&cd_size.to_le_bytes());
+        bytes.extend_from_slice(&cd_start.to_le_bytes());
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+
+        let cursor = Cursor::new(bytes);
+        let zip = ZipReader::open(cursor).expect("3-entry ZIP must open without bad CDH");
+        assert_eq!(zip.entries().len(), 3, "all 3 entries must be enumerated");
+        assert_eq!(zip.entries()[0].name, "a.txt");
+        assert_eq!(zip.entries()[1].name, "b.txt");
+        assert_eq!(zip.entries()[2].name, "c.txt");
+    }
+
+    /// A STORED entry (method=0) MUST have `is_compressed=false`. A
+    /// DEFLATE entry (method=8) MUST have `is_compressed=true`. With the
+    /// off-by-4 bug, `method` reads `version_needed` (typically 20),
+    /// marking every entry as compressed — even STORED ones — which
+    /// would send raw bytes to the DEFLATE decompressor and fail.
+    #[test]
+    fn test_stored_entry_not_compressed() {
+        // Use the STORED builder; the entry should report is_compressed=false.
+        let bytes = build_zip_one_stored_entry("stored.txt", b"uncompressed-data");
+        let cursor = Cursor::new(bytes);
+        let zip = ZipReader::open(cursor).expect("STORED entry ZIP must open");
+        assert_eq!(zip.entries().len(), 1);
+        assert!(
+            !zip.entries()[0].is_compressed,
+            "STORED (method=0) entry must have is_compressed=false"
         );
     }
 }
