@@ -1078,3 +1078,107 @@ deferred_discoveries:
   - ZIP CRC verification: parser doesn't verify CRC-32 on decompressed data.
     Could add as defense-in-depth, but most APK tools already verify this
     during install. Deferred — current focus is on parsing reliability.
+
+---
+Task ID: audit-freeze-forceclose
+Agent: main (stellar-trails v9.8.0, Standard tier, Coding type, Continuation=YES)
+Task: Audit & fix 'APK working tapi terkadang freeze saat scan atau force close saat scan & back to main'
+
+Work Log:
+- Read prior worklog: all parsing fixes in place (EOCD off-by-one commit 2232e40, EOCD comment_len + ZIP64 + .apks support commit abfd045, CDH off-by-4 fix commit d357227). CI #30 green.
+- Applied Proximate Cause Triage: symptoms map directly to (a) Rust panic crossing JNI FFI boundary = process abort, (b) file I/O on main thread in SAF picker onResult callback = freeze/ANR, (c) LaunchedEffect + nested scope.launch leak = onDone fires after disposal = force close. All within 1 hop, ≤2 assumptions each.
+- IMPL-001: JNI scanApk wrapped in std::panic::catch_unwind(AssertUnwindSafe). Body extracted to scan_apk_body() fn returning Result<String, String>. Panic payload downcast via panic_payload_to_string helper → JSON {"error":"internal panic: <msg>"}.
+- IMPL-002: JNI diffApks wrapped in catch_unwind, body extracted to diff_apks_body(). Same panic→JSON error conversion.
+- IMPL-003: PickerScreen onResult callback — was running copyUriToCacheExt synchronously on MAIN THREAD (froze UI for 100MB APK). Now: scope.launch { withContext(Dispatchers.IO) { copyUriToCacheExt(...) } }, with `copying` flag driving "Copying to cache…" button label and disabling all 3 buttons.
+- IMPL-004: DiffScreen — same main-thread I/O bug in pickOld + pickNew onResult callbacks. Same fix applied to both sites, plus `copying` flag on the two OutlinedButtons and the Run diff Button.
+- IMPL-005: ScanProgressScreen — LaunchedEffect(apkPath) { scope.launch { ... onDone(...) } } was wrong. scope.launch detaches work from LaunchedEffect's lifecycle. When user back-pressed during scan, JNI call continued, resumed on cancelled scope, called onDone → nav.navigate from dead back stack → force close. Fix: removed nested scope.launch (LaunchedEffect IS already a coroutine), guard onDone with `if (!isActive) return@LaunchedEffect`.
+
+ci_iterations: 3
+  - Run #31 (commit a76074b): FAIL — cargo fmt --check rejected multi-line `AssertUnwindSafe(|| { scan_apk_body(&path) })`, multi-line `let mut apk = ...`, and multi-line `scan_to_findings(...).map_err(...)?` (both calls in diff_apks_body)
+  - Run #32 (commit aa6b2eb): FAIL — fmt fix split catch_unwind across two lines; rustfmt actually wanted single line (97 chars fits max_width=100)
+  - Run #33 (commit c650e9d): SUCCESS — single-line catch_unwind; rustfmt+clippy+tests pass; 3 ABIs cross-compile; debug APK 15.85MB + release APK 3.54MB (signed) + native libs 0.88MB
+
+discoveries:
+  - observation: rustfmt single-line threshold
+    found_while: fixing CI #31 fmt failure
+    surface: same (rust/jni-bridge/src/api.rs — the catch_unwind line I just added)
+    action: fix-now
+    outcome: fixed in commits aa6b2eb + c650e9d (two iterations — first overshot to 2-line, then collapsed to 1-line)
+
+scope_drift: NONE
+
+pivot: NONE
+
+git_state:
+  branch: main
+  local_head: c650e9d (matches remote)
+  remote_main: c650e9d
+  ci_run: #33 (success)
+  prior_fix_commits: 2232e40 (EOCD off-by-one) + abfd045 (EOCD comment_len + ZIP64 + .apks) + d357227 (CDH off-by-4) — still in place, working as intended
+
+root_cause_analysis:
+  symptom_freeze: "APK working tapi terkadang freeze saat scan"
+  symptom_force_close: "atau force close saat scan & back to main"
+  proximate_causes:
+    - freeze: copyUriToCacheExt ran in SAF picker onResult callback (main thread); for large APK this blocked UI for seconds → ANR/freeze
+    - force_close_path_1: Rust panic in scan crossed JNI FFI boundary = UB on Android = SIGABRT/SIGSEGV = process death
+    - force_close_path_2: ScanProgressScreen LaunchedEffect launched inner scope.launch (tied to rememberCoroutineScope, not LaunchedEffect) — when user back-pressed, JNI continued, resumed on cancelled scope, fired onDone → nav.navigate from dead back stack → IllegalStateException
+  verification: All 3 proximate causes addressed. CI #33 green. Runtime device-test deferred to user.
+
+next_step: |
+  User should:
+    1. Download NEW apk-detector-release-apk.zip from CI run #33:
+       https://github.com/hoshiyomiX/apk-detector/actions/runs/30145359331
+    2. CRITICAL: Uninstall old APK first to clear cached .so:
+       adb uninstall id.zai.apkdetector
+       (Engine version should read "0.1.0+c650e9d" — if it reads older, cached .so.)
+    3. Install new release APK:
+       adb install app-release.apk
+    4. Re-test the scenarios that previously froze / force-closed:
+       a. Pick a LARGE APK (50MB+) — UI should show "Copying to cache…" then
+          transition to ScanProgressScreen. No freeze during the copy phase.
+       b. Start a scan on a large APK, then back-press during the
+          "Scanning DEX strings…" phase. Should return cleanly to PickerScreen
+          with NO force close. (The JNI scan continues in the background until
+          it completes, but its result is discarded — no onDone navigation
+          fires from the dead scope.)
+       c. Pick a malformed/corrupt APK that previously force-closed. Should
+          now surface "Error: internal panic: <msg>" in red on the
+          ScanProgressScreen with a Back button — NO process death.
+    5. CHECK "Engine version" label on PickerScreen:
+       - Should read "0.1.0+c650e9d"
+       - If older → cached .so, must uninstall + reinstall.
+
+  Expected behavior now (with all 5 fixes):
+    - Large APK pick: NO freeze during cache copy (was: 5-30s freeze/ANR)
+    - Back-press during scan: returns cleanly to picker, NO force close
+      (was: IllegalStateException from nav.navigate on dead scope)
+    - Rust panic on malformed APK: shows "Error: internal panic: <msg>" in
+      red on ScanProgressScreen with Back button, NO process death
+      (was: SIGABRT/SIGSEGV force close)
+    - Diff screen: same async cache copy fix — picking large APKs for diff
+      no longer freezes the UI
+
+  If freeze/FC still occurs after this fix:
+    - For freeze: check `adb logcat` for "main thread blocked" — if it's
+      in copyUriToCacheExt, the Dispatchers.IO dispatch isn't working
+      (unlikely). If it's elsewhere, may be a new bug.
+    - For FC: check `adb logcat` for the crash signal. If it's SIGABRT or
+      SIGSEGV in libapk_detector.so, the panic escaped catch_unwind
+      (shouldn't happen — catch_unwind catches all Rust panics). If it's
+      a Kotlin IllegalStateException, the isActive guard failed (also
+      shouldn't happen). Either case = new bug, file with crash log.
+
+deferred_discoveries:
+  - ReportScreen back-button behavior: not audited. The user reported
+    "scan & back to main" which I interpreted as back-press during scan.
+    If they meant back-press during report viewing, that's a different
+    flow — ReportScreen just calls nav.popBackStack(), should be safe.
+    Deferred unless user reports issues.
+  - HistoryScreen: not audited. Same — simple back-nav, should be safe.
+  - DiffScreen scope.launch + back-press: the diff button uses
+    scope.launch (rememberCoroutineScope), same pattern as the original
+    ScanProgressScreen bug. BUT DiffScreen doesn't call any navigation
+    callback on success — it just writes `result = ...` state, which is
+    safe on a disposed composition (state writes no-op). So no fix needed.
+    Logged for awareness.
