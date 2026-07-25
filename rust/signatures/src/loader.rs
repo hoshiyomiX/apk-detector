@@ -109,6 +109,7 @@ macro_rules! inline_rules {
                 "clone_repackage.yaml",
                 include_str!("../yaml/clone_repackage.yaml"),
             ),
+            ("app_defense.yaml", include_str!("../yaml/app_defense.yaml")),
         ]
     };
 }
@@ -119,7 +120,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn all_eight_categories_present() {
+    fn all_categories_have_rules() {
         let s = SignatureSet::load_embedded().expect("embedded rules load");
         for cat in crate::ALL_CATEGORIES {
             assert!(

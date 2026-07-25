@@ -11,7 +11,7 @@
 use std::ffi::{c_char, c_int, c_void, CStr};
 use std::sync::OnceLock;
 
-use detector::{full_scan, ReportDiff};
+use detector::{full_scan, simulate, DeviceProfile, ReportDiff, SimulationReport};
 use signatures::SignatureSet as SigSet;
 
 use crate::ensure_logger;
@@ -486,6 +486,126 @@ pub unsafe extern "system" fn Java_id_zai_apkdetector_data_NativeBridge_engineVe
         env,
         &format!("{}+{}", env!("CARGO_PKG_VERSION"), env!("BUILD_SHA")),
     )
+}
+
+// ---------------------------------------------------------------------------
+// 5) scanApkBlockingOnly(path: String): String — Markdown report filtered to
+//    block/restrict findings only (Medium / High / Critical severity).
+// ---------------------------------------------------------------------------
+//
+// Same scan body as `scanApk`, but renders via `Report::to_markdown_blocking_only`
+// instead of `Report::to_markdown`. The filter hides Low + Info findings —
+// the user sees only detections that would actually block or restrict them
+// if they don't meet the detection criteria.
+//
+// PANIC SAFETY: same `catch_unwind` wrapper as `scanApk`.
+#[no_mangle]
+pub unsafe extern "system" fn Java_id_zai_apkdetector_data_NativeBridge_scanApkBlockingOnly(
+    env: JNIEnvPtr,
+    _class: jclass,
+    path_jstr: jstring,
+) -> jstring {
+    ensure_logger();
+    log::info!("scanApkBlockingOnly called");
+
+    let path = match jstr_to_string(env, path_jstr) {
+        Ok(s) => s,
+        Err(e) => return return_error(env, &format!("path: {}", e)),
+    };
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        scan_apk_blocking_only_body(&path)
+    }));
+    match result {
+        Ok(Ok(md)) => return_string(env, &md),
+        Ok(Err(e)) => return_error(env, &e),
+        Err(payload) => {
+            let msg = panic_payload_to_string(payload);
+            log::error!("scanApkBlockingOnly panic for {}: {}", path, msg);
+            return_error(env, &format!("internal panic: {}", msg))
+        }
+    }
+}
+
+/// Body of `scanApkBlockingOnly` — extracted so it can be wrapped in
+/// `catch_unwind`.
+fn scan_apk_blocking_only_body(path: &str) -> Result<String, String> {
+    let sigs = sigs()?;
+    let file = std::fs::File::open(path).map_err(|e| format!("open {}: {}", path, e))?;
+    let reader: apk_parser::AnyReader = Box::new(file);
+    let mut apk =
+        apk_parser::open_any(reader, path).map_err(|e| format!("apk parse {}: {}", path, e))?;
+    let report = full_scan(path, &mut apk, sigs);
+    Ok(report.to_markdown_blocking_only(sigs))
+}
+
+// ---------------------------------------------------------------------------
+// 6) scanApkSimulated(path: String, profileJson: String): String — Markdown
+//    simulation report.
+// ---------------------------------------------------------------------------
+//
+// Runs the same scan as `scanApk`, then evaluates each finding against the
+// supplied `DeviceProfile` (a JSON object) and emits a simulation report
+// showing which detections would TRIGGER on the device vs BYPASS vs UNKNOWN.
+//
+// The profile JSON schema matches `detector::DeviceProfile::from_json`. Keys
+// the parser doesn't recognize are silently ignored (forward-compat). Missing
+// keys default to `None` → `Unknown` verdict for any rule that needs them.
+//
+// If the profile JSON fails to parse, the function returns
+// `{"error":"profile: <msg>"}` so the Kotlin side can surface it.
+//
+// PANIC SAFETY: same `catch_unwind` wrapper as `scanApk`.
+#[no_mangle]
+pub unsafe extern "system" fn Java_id_zai_apkdetector_data_NativeBridge_scanApkSimulated(
+    env: JNIEnvPtr,
+    _class: jclass,
+    path_jstr: jstring,
+    profile_jstr: jstring,
+) -> jstring {
+    ensure_logger();
+    log::info!("scanApkSimulated called");
+
+    let path = match jstr_to_string(env, path_jstr) {
+        Ok(s) => s,
+        Err(e) => return return_error(env, &format!("path: {}", e)),
+    };
+    let profile_json = match jstr_to_string(env, profile_jstr) {
+        Ok(s) => s,
+        Err(e) => return return_error(env, &format!("profile: {}", e)),
+    };
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        scan_apk_simulated_body(&path, &profile_json)
+    }));
+    match result {
+        Ok(Ok(md)) => return_string(env, &md),
+        Ok(Err(e)) => return_error(env, &e),
+        Err(payload) => {
+            let msg = panic_payload_to_string(payload);
+            log::error!(
+                "scanApkSimulated panic for {} with profile={}: {}",
+                path,
+                profile_json,
+                msg
+            );
+            return_error(env, &format!("internal panic: {}", msg))
+        }
+    }
+}
+
+/// Body of `scanApkSimulated` — extracted so it can be wrapped in
+/// `catch_unwind`.
+fn scan_apk_simulated_body(path: &str, profile_json: &str) -> Result<String, String> {
+    let profile = DeviceProfile::from_json(profile_json).map_err(|e| format!("profile: {}", e))?;
+    let sigs = sigs()?;
+    let file = std::fs::File::open(path).map_err(|e| format!("open {}: {}", path, e))?;
+    let reader: apk_parser::AnyReader = Box::new(file);
+    let mut apk =
+        apk_parser::open_any(reader, path).map_err(|e| format!("apk parse {}: {}", path, e))?;
+    let report = full_scan(path, &mut apk, sigs);
+    let sim: SimulationReport = simulate(&report, &profile);
+    Ok(sim.to_markdown())
 }
 
 // ---------------------------------------------------------------------------

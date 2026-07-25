@@ -1,0 +1,133 @@
+# App-defense behavior checks
+# Sources: direct dissection of OCTO (CT Corp Digital Indonesia) classes*.dex
+# covering 7 DEX files (~87MB total). Each rule below corresponds to a
+# DEX string we found via `strings classes*.dex | grep <kw>` that was
+# NOT covered by the original 8-category signature set.
+#
+# These are runtime *behavior* checks the app performs against the user's
+# device environment. Distinct from:
+#   - AntiTamper (signature/self-integrity — protects the APK itself)
+#   - AntiHooking (Frida/Xposed — protects against instrumentation)
+# AppDefense targets the *user's environment*: are they debugging? on VPN?
+# spoofing location? using accessibility services? screen-recording?
+# attested their DRM? etc.
+---
+- id: app-defense-anti-debug
+  name: "Debugger detection"
+  category: app_defense
+  severity: high
+  evidence_location: dex_string
+  patterns:
+    - "isDebuggerConnected"
+    - "android.os.Debug"
+    - "Debug.isDebuggerConnected"
+    - "/proc/self/status"
+    - "TracerPid"
+  description: "Detects attached debuggers via android.os.Debug + /proc/self/status TracerPid scan."
+  bypass_hint: app-defense-anti-debug
+
+- id: app-defense-debug-flag
+  name: "ro.debuggable / developer-options flag check"
+  category: app_defense
+  severity: medium
+  evidence_location: dex_string
+  patterns:
+    - "ro.debuggable"
+    - "Settings.Global"
+    - "ADB_ENABLED"
+    - "DEVELOPMENT_SETTINGS_ENABLED"
+  description: "Reads system properties / Settings.Global for signs of a debug build or enabled developer options."
+  bypass_hint: app-defense-debug-flag
+
+- id: app-defense-vpn
+  name: "VPN interface detection"
+  category: app_defense
+  severity: medium
+  evidence_location: dex_string
+  patterns:
+    - "tun0"
+    - "tun1"
+    - "VPN_SERVICE"
+    - "VpnService"
+    - "NetworkCapabilities.TRANSPORT_VPN"
+  description: "Checks for active VPN tunnel — used to block users on VPNs (geo-fencing / fraud-defense)."
+  bypass_hint: app-defense-vpn
+
+- id: app-defense-mock-location
+  name: "Mock location detection"
+  category: app_defense
+  severity: medium
+  evidence_location: dex_string
+  patterns:
+    - "isFromMockProvider"
+    - "Location.isFromMockProvider"
+    - "setIsFromMockProvider"
+    - "MOCK_LOCATION"
+  description: "Detects spoofed GPS via Location.isFromMockProvider() — common in fraud / geo-restricted apps."
+  bypass_hint: app-defense-mock-location
+
+- id: app-defense-accessibility
+  name: "Accessibility-service abuse defense"
+  category: app_defense
+  severity: high
+  evidence_location: dex_string
+  patterns:
+    - "BIND_ACCESSIBILITY_SERVICE"
+    - "AccessibilityService"
+    - "getEnabledAccessibilityServiceList"
+    - "isAccessibilityEnabled"
+  description: "Blocks screen-reading / auto-clicker accessibility services — banking-trojan defense."
+  bypass_hint: app-defense-accessibility
+
+- id: app-defense-mediaprojection
+  name: "MediaProjection / screen-recording defense"
+  category: app_defense
+  severity: medium
+  evidence_location: dex_string
+  patterns:
+    - "MediaProjection"
+    - "createVirtualDisplay"
+    - "MediaProjectionManager"
+    - "FLAG_SECURE"
+  description: "Detects active screen capture via MediaProjection API; often paired with FLAG_SECURE."
+  bypass_hint: app-defense-mediaprojection
+
+- id: app-defense-drm-attestation
+  name: "Widevine DRM attestation check"
+  category: app_defense
+  severity: high
+  evidence_location: dex_string
+  patterns:
+    - "MediaDrm"
+    - "android.media.MediaDrm"
+    - "Widevine"
+    - "getWidevineDeviceUUID"
+    - "L1"
+  description: "Queries MediaDrm for Widevine L1/L3 attestation — strong hardware-identity signal."
+  bypass_hint: app-defense-drm-attestation
+
+- id: app-defense-knox-tima
+  name: "Samsung KNOX / TIMA attestation"
+  category: app_defense
+  severity: high
+  evidence_location: dex_string
+  patterns:
+    - "com.samsung.android.knox"
+    - "TIMA"
+    - "AttestationResult"
+    - "KnoxContainerManager"
+  description: "Samsung KNOX TIMA attestation — only fires on Samsung devices but very strong signal when present."
+  bypass_hint: app-defense-knox-tima
+
+- id: app-defense-play-services-presence
+  name: "Google Play Services presence + version check"
+  category: app_defense
+  severity: medium
+  evidence_location: dex_string
+  patterns:
+    - "isGooglePlayServicesAvailable"
+    - "GoogleApiAvailability"
+    - "com.google.android.gms.common"
+    - "ConnectionResult.SUCCESS"
+  description: "Requires Google Play Services to be installed + up-to-date — blocks AOSP / degoogled ROMs."
+  bypass_hint: app-defense-play-services-presence

@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
-/// The 8 detection categories tracked by APK Detector.
+/// The 9 detection categories tracked by APK Detector.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Category {
@@ -26,6 +26,13 @@ pub enum Category {
     AntiEmulator,
     /// Clone / repackage detection (app-cloning SDKs, package-name hash)
     CloneRepackage,
+    /// App-defense behavior checks — anti-debug, VPN, mock-location,
+    /// accessibility-abuse defense, MediaProjection, DRM attestation,
+    /// Knox/TIMA, Google Play Services presence, debug-flag checks.
+    /// Distinct from AntiTamper (signature/self-integrity) and
+    /// AntiHooking (Frida/Xposed): these are runtime *behavior* checks
+    /// targeting the user's environment, not the tooling chain.
+    AppDefense,
 }
 
 impl Category {
@@ -39,6 +46,7 @@ impl Category {
             Category::AntiHooking => "anti_hooking",
             Category::AntiEmulator => "anti_emulator",
             Category::CloneRepackage => "clone_repackage",
+            Category::AppDefense => "app_defense",
         }
     }
 }

@@ -3,9 +3,30 @@ package id.zai.apkdetector.data
 /**
  * Native bridge to the Rust `jni-bridge` crate.
  *
- * Loads `libapk_detector.so` on first access and exposes the four JNI exports
- * as idiomatic Kotlin suspend-or-blocking functions. Errors from the Rust side
- * arrive as `{"error": "..."}` JSON; we parse them and throw [ScanException].
+ * Loads `libapk_detector.so` on first access and exposes the six JNI exports
+ * as idiomatic Kotlin functions. Errors from the Rust side arrive as
+ * `{"error": "..."}` JSON; we parse them and surface them via [ScanResult.Err].
+ *
+ * ## JNI exports
+ *
+ * 1. `scanApk(path)` — full Markdown report (all severities)
+ * 2. `diffApks(oldPath, newPath)` — Markdown diff of two APK versions
+ * 3. `listSignatures()` — JSON array of built-in rule metadata
+ * 4. `engineVersion()` — semver + git SHA
+ * 5. `scanApkBlockingOnly(path)` — Markdown report filtered to Medium / High /
+ *    Critical severity findings only (block/restrict filter). Low and Info
+ *    findings are hidden — useful for answering "which defenses in this APK
+ *    will actually stop a real user?".
+ * 6. `scanApkSimulated(path, profileJson)` — runs the scan, then evaluates
+ *    each finding against the supplied [DeviceProfile] JSON and emits a
+ *    simulation report showing which detections would TRIGGER on the device
+ *    vs BYPASS vs UNKNOWN. Use [DeviceProfile.presets] for curated profiles.
+ *
+ * ## Threading
+ *
+ * All native methods are SYNCHRONOUS and BLOCKING. Callers MUST run them on
+ * a worker thread (e.g. `withContext(Dispatchers.IO)`) — calling them on
+ * the main thread will freeze the UI for the duration of the scan.
  */
 object NativeBridge {
     init {
@@ -16,10 +37,37 @@ object NativeBridge {
     private external fun diffApks(oldPath: String, newPath: String): String
     private external fun listSignatures(): String
     private external fun engineVersion(): String
+    private external fun scanApkBlockingOnly(path: String): String
+    private external fun scanApkSimulated(path: String, profileJson: String): String
 
-    /** Run a static scan on a single APK file. Returns Markdown report. */
+    /** Run a static scan on a single APK file. Returns full Markdown report. */
     fun scan(path: String): ScanResult {
         val raw = scanApk(path)
+        return ScanResult.parse(raw)
+    }
+
+    /**
+     * Run a static scan and return a FILTERED Markdown report containing only
+     * findings whose severity would block or restrict the user (Medium / High /
+     * Critical). Low and Info findings are hidden — use [scan] for the full
+     * picture.
+     */
+    fun scanBlockingOnly(path: String): ScanResult {
+        val raw = scanApkBlockingOnly(path)
+        return ScanResult.parse(raw)
+    }
+
+    /**
+     * Run a static scan, then simulate which findings would TRIGGER on a
+     * device matching [profileJson]. Returns a Markdown simulation report
+     * with three sections: 🔴 Triggered, 🟢 Bypassed, ⚪ Unknown.
+     *
+     * The [profileJson] must be a JSON object whose keys match the
+     * [DeviceProfile] schema. See [DeviceProfile.presets] for curated
+     * examples.
+     */
+    fun scanSimulated(path: String, profileJson: String): ScanResult {
+        val raw = scanApkSimulated(path, profileJson)
         return ScanResult.parse(raw)
     }
 
@@ -32,8 +80,31 @@ object NativeBridge {
     /** List all built-in detection rules as JSON. */
     fun signatures(): String = listSignatures()
 
-    /** Engine semver, e.g. "0.1.0". */
+    /** Engine semver, e.g. "0.1.0+e5114a4". */
     fun version(): String = engineVersion()
+}
+
+/**
+ * Curated device profiles for [NativeBridge.scanSimulated]. Each preset is a
+ * JSON string ready to pass as `profileJson`.
+ *
+ * Presets:
+ * - `"clean"` — stock Android, no root, Play Integrity passing, Play Store installer.
+ * - `"rooted-magisk"` — rooted with Magisk DenyList ON + Play Integrity Fix.
+ * - `"rooted-no-magisk"` — rooted via KingRoot/etc. with no stealth.
+ * - `"emulator"` — Android Studio emulator.
+ * - `"frida"` — Frida server running.
+ * - `"dev-options-on"` — Developer Options + USB debugging enabled.
+ */
+object DeviceProfile {
+    val presets: Map<String, String> = mapOf(
+        "clean" to """{"rooted":false,"magisk_denylist_on":false,"play_integrity_passes":true,"safetynet_passes":true,"installer_is_play_store":true,"in_clone_runtime":false,"is_emulator":false,"frida_running":false,"xposed_loaded":false,"mock_location_on":false,"vpn_active":false,"debugger_attached":false,"developer_options_on":false,"accessibility_service_on":false,"media_projection_active":false,"play_services_available":true,"is_samsung_knox":false,"widevine_l1":false,"repackaged":false,"self_integrity_broken":false}""",
+        "rooted-magisk" to """{"rooted":true,"magisk_denylist_on":true,"play_integrity_passes":true,"safetynet_passes":true,"installer_is_play_store":true,"in_clone_runtime":false,"is_emulator":false,"frida_running":false,"xposed_loaded":false,"mock_location_on":false,"vpn_active":false,"debugger_attached":false,"developer_options_on":false,"accessibility_service_on":false,"media_projection_active":false,"play_services_available":true,"is_samsung_knox":false,"widevine_l1":false,"repackaged":false,"self_integrity_broken":false}""",
+        "rooted-no-magisk" to """{"rooted":true,"magisk_denylist_on":false,"play_integrity_passes":false,"safetynet_passes":false,"installer_is_play_store":true,"in_clone_runtime":false,"is_emulator":false,"frida_running":false,"xposed_loaded":false,"mock_location_on":false,"vpn_active":false,"debugger_attached":false,"developer_options_on":false,"accessibility_service_on":false,"media_projection_active":false,"play_services_available":true,"is_samsung_knox":false,"widevine_l1":false,"repackaged":false,"self_integrity_broken":false}""",
+        "emulator" to """{"rooted":false,"magisk_denylist_on":false,"play_integrity_passes":false,"safetynet_passes":false,"installer_is_play_store":false,"in_clone_runtime":false,"is_emulator":true,"frida_running":false,"xposed_loaded":false,"mock_location_on":false,"vpn_active":false,"debugger_attached":true,"developer_options_on":true,"accessibility_service_on":false,"media_projection_active":false,"play_services_available":true,"is_samsung_knox":false,"widevine_l1":false,"repackaged":false,"self_integrity_broken":false}""",
+        "frida" to """{"rooted":false,"magisk_denylist_on":false,"play_integrity_passes":true,"safetynet_passes":true,"installer_is_play_store":true,"in_clone_runtime":false,"is_emulator":false,"frida_running":true,"xposed_loaded":false,"mock_location_on":false,"vpn_active":false,"debugger_attached":false,"developer_options_on":false,"accessibility_service_on":false,"media_projection_active":false,"play_services_available":true,"is_samsung_knox":false,"widevine_l1":false,"repackaged":false,"self_integrity_broken":false}""",
+        "dev-options-on" to """{"rooted":false,"magisk_denylist_on":false,"play_integrity_passes":true,"safetynet_passes":true,"installer_is_play_store":true,"in_clone_runtime":false,"is_emulator":false,"frida_running":false,"xposed_loaded":false,"mock_location_on":false,"vpn_active":false,"debugger_attached":true,"developer_options_on":true,"accessibility_service_on":false,"media_projection_active":false,"play_services_available":true,"is_samsung_knox":false,"widevine_l1":false,"repackaged":false,"self_integrity_broken":false}""",
+    )
 }
 
 /** Either a successful scan's Markdown output, or an error message. */

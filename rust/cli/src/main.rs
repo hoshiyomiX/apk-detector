@@ -11,15 +11,18 @@
 //! ## Usage
 //!
 //! ```text
-//! apk-detector-cli <APK_OR_APKS_PATH> [--blocking-only] [--out <FILE>]
+//! apk-detector-cli <APK_OR_APKS_PATH> [OPTIONS]
 //! ```
 //!
-//! - Default mode: produces the full Markdown report (all severities).
-//! - `--blocking-only`: produces a filtered report containing only findings
-//!   whose severity would block or restrict the user (Medium / High /
-//!   Critical). Low and Info findings are hidden. Useful for answering
-//!   "which defenses in this APK will actually stop a real user?"
-//! - `--out <FILE>`: write the Markdown to a file instead of stdout.
+//! ## Options
+//!
+//! - `--blocking-only` — show only Medium/High/Critical findings (block/restrict filter)
+//! - `--simulate-preset <NAME>` — simulate against a curated preset profile
+//!   (`clean`, `rooted-magisk`, `rooted-no-magisk`, `emulator`, `frida`, `dev-options-on`)
+//! - `--simulate-profile <JSON>` — simulate against a custom profile JSON
+//!   (e.g. `'{"rooted":true,"magisk_denylist_on":true}'`)
+//! - `--out <FILE>` — write Markdown to FILE instead of stdout
+//! - `--json` — output simulation result as JSON (only valid with --simulate-*)
 //!
 //! ## Exit codes
 //!
@@ -38,6 +41,7 @@ use std::io::Write;
 use std::process::ExitCode;
 
 use detector::full_scan;
+use detector::{simulate, DeviceProfile};
 use signatures::SignatureSet;
 
 fn main() -> ExitCode {
@@ -47,13 +51,18 @@ fn main() -> ExitCode {
         Err(e) => {
             eprintln!("{}", e);
             eprintln!();
-            eprintln!(
-                "Usage: apk-detector-cli <APK_OR_APKS_PATH> [--blocking-only] [--out <FILE>]"
-            );
+            eprintln!("Usage: apk-detector-cli <APK_OR_APKS_PATH> [OPTIONS]");
             eprintln!();
             eprintln!("Options:");
-            eprintln!("  --blocking-only   Show only Medium/High/Critical findings (block/restrict filter)");
-            eprintln!("  --out <FILE>      Write Markdown to FILE instead of stdout");
+            eprintln!("  --blocking-only              Show only Medium/High/Critical findings");
+            eprintln!("  --simulate-preset <NAME>     Simulate against a curated preset");
+            eprintln!("                               (clean|rooted-magisk|rooted-no-magisk|emulator|frida|dev-options-on)");
+            eprintln!("  --simulate-profile <JSON>    Simulate against a custom profile JSON");
+            eprintln!("                               (e.g. '{{\"rooted\":true,\"magisk_denylist_on\":true}}')");
+            eprintln!(
+                "  --out <FILE>                 Write Markdown/JSON to FILE instead of stdout"
+            );
+            eprintln!("  --json                       Output JSON (only valid with --simulate-*)");
             return ExitCode::from(1);
         }
     };
@@ -103,33 +112,66 @@ fn main() -> ExitCode {
         }
     };
 
-    // Render Markdown — full or filtered based on flag
-    let md = if parsed.blocking_only {
-        report.to_markdown_blocking_only(&sigs)
+    // Resolve the output mode: full, blocking-only, or simulate-*.
+    // If both --simulate-preset and --simulate-profile are given, preset wins
+    // (we log to stderr so the user knows).
+    let simulate_profile: Option<DeviceProfile> = if let Some(name) = &parsed.simulate_preset {
+        match DeviceProfile::preset(name) {
+            Some(p) => Some(p),
+            None => {
+                eprintln!(
+                    "Error: unknown --simulate-preset `{}`. Valid presets: clean, rooted-magisk, rooted-no-magisk, emulator, frida, dev-options-on",
+                    name
+                );
+                return ExitCode::from(1);
+            }
+        }
+    } else if let Some(json) = &parsed.simulate_profile {
+        match DeviceProfile::from_json(json) {
+            Ok(p) => Some(p),
+            Err(e) => {
+                eprintln!("Error: --simulate-profile parse: {}", e);
+                return ExitCode::from(1);
+            }
+        }
     } else {
-        report.to_markdown(&sigs)
+        None
+    };
+
+    // Render Markdown / JSON
+    let (output, ext_label): (String, &'static str) = if let Some(profile) = simulate_profile {
+        let sim = simulate(&report, &profile);
+        if parsed.json {
+            (sim.to_json(), "json")
+        } else {
+            (sim.to_markdown(), "md")
+        }
+    } else if parsed.blocking_only {
+        (report.to_markdown_blocking_only(&sigs), "md")
+    } else {
+        (report.to_markdown(&sigs), "md")
     };
 
     // Output to file or stdout
     if let Some(out_path) = &parsed.out_path {
-        if let Err(e) = write_file(out_path, &md) {
+        if let Err(e) = write_file(out_path, &output) {
             eprintln!("Error: write {}: {}", out_path, e);
             return ExitCode::from(1);
         }
         eprintln!(
-            "Wrote {} bytes to {} ({} findings, {} blocking)",
-            md.len(),
+            "Wrote {} bytes to {} ({} findings, {} blocking) [{}]",
+            output.len(),
             out_path,
             report.findings.len(),
             report
                 .findings
                 .iter()
                 .filter(|f| f.severity.is_blocking())
-                .count()
+                .count(),
+            ext_label,
         );
     } else {
-        // stdout
-        print!("{}", md);
+        print!("{}", output);
     }
 
     ExitCode::from(0)
@@ -140,10 +182,13 @@ struct ParsedArgs {
     apk_path: String,
     blocking_only: bool,
     out_path: Option<String>,
+    simulate_preset: Option<String>,
+    simulate_profile: Option<String>,
+    json: bool,
 }
 
 /// Hand-rolled argument parser — no `clap` dependency. The CLI has only
-/// 3 flags so this is simpler than pulling in a parser framework.
+/// 6 flags so this is simpler than pulling in a parser framework.
 fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
     if args.len() < 2 {
         return Err("Error: missing APK path argument".to_string());
@@ -151,6 +196,9 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
     let mut apk_path: Option<String> = None;
     let mut blocking_only = false;
     let mut out_path: Option<String> = None;
+    let mut simulate_preset: Option<String> = None;
+    let mut simulate_profile: Option<String> = None;
+    let mut json = false;
     let mut i = 1;
     while i < args.len() {
         let a = &args[i];
@@ -158,12 +206,29 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
             "--blocking-only" => {
                 blocking_only = true;
             }
+            "--simulate-preset" => {
+                if i + 1 >= args.len() {
+                    return Err("Error: --simulate-preset requires a name argument".to_string());
+                }
+                simulate_preset = Some(args[i + 1].clone());
+                i += 1;
+            }
+            "--simulate-profile" => {
+                if i + 1 >= args.len() {
+                    return Err("Error: --simulate-profile requires a JSON argument".to_string());
+                }
+                simulate_profile = Some(args[i + 1].clone());
+                i += 1;
+            }
             "--out" => {
                 if i + 1 >= args.len() {
                     return Err("Error: --out requires a file path argument".to_string());
                 }
                 out_path = Some(args[i + 1].clone());
                 i += 1;
+            }
+            "--json" => {
+                json = true;
             }
             "-h" | "--help" => {
                 return Err("Help:".to_string()); // triggers usage print
@@ -182,10 +247,21 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
         i += 1;
     }
     let apk_path = apk_path.ok_or_else(|| "Error: missing APK path argument".to_string())?;
+
+    // Validate: --json only makes sense with --simulate-*
+    if json && simulate_preset.is_none() && simulate_profile.is_none() {
+        return Err(
+            "Error: --json is only valid with --simulate-preset or --simulate-profile".to_string(),
+        );
+    }
+
     Ok(ParsedArgs {
         apk_path,
         blocking_only,
         out_path,
+        simulate_preset,
+        simulate_profile,
+        json,
     })
 }
 

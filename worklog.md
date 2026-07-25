@@ -1299,3 +1299,178 @@ deferred_discoveries:
     but no "**Package:**" line — the AXML parser didn't extract the package name from OCTO's
     manifest. Could be a parser bug or OCTO uses a non-standard manifest format. Not blocking
     the filter feature, but worth investigating in a future iteration.
+
+---
+last_phase: DELIVER
+task: (1) Fix recurring scan-freeze on OCTO. (2) Find OCTO's anti-non-playstore detection + analyze other blocking patterns not yet covered. (3) Implement simulator that predicts which detections trigger on a target device given scan results.
+complexity: Complex
+task_type: Coding
+files_modified:
+  - rust/signatures/src/types.rs (added Category::AppDefense variant + as_str)
+  - rust/signatures/src/lib.rs (ALL_CATEGORIES now has 9 entries)
+  - rust/signatures/src/loader.rs (inline_rules! includes app_defense.yaml; renamed all_eight_categories_present → all_categories_have_rules)
+  - rust/signatures/yaml/app_defense.yaml (NEW — 9 rules: anti-debug, debug-flag, VPN, mock-location, accessibility, MediaProjection, DRM, KNOX/TIMA, Play Services presence)
+  - rust/detector/src/app_defense.rs (NEW — DEX-string scanner for AppDefense rules)
+  - rust/detector/src/lib.rs (added app_defense mod + simulator mod + ScanBudget + full_scan_with_budget; re-export simulate + DeviceProfile + SimulationReport + SimulationVerdict)
+  - rust/detector/src/common.rs (BudgetGuard + budget_exhausted + prime_dex_cache + DEX_CACHE thread-local + scan_dex_strings rewritten to use cache + read_and_parse_dex helper + 4 budget unit tests)
+  - rust/detector/src/report.rs (category_label handles AppDefense)
+  - rust/detector/src/bypass_hints.rs (9 new bypass hints for app-defense-* rules)
+  - rust/detector/src/simulator.rs (NEW — DeviceProfile struct with 20 fields, 6 presets, to_json, from_json, simulate(), SimulationReport, SimulationVerdict, verdict_table with 40+ mappings, MD + JSON renderers, 14 unit tests)
+  - rust/jni-bridge/src/api.rs (added scanApkBlockingOnly + scanApkSimulated JNI exports, both panic-safe via catch_unwind)
+  - rust/cli/src/main.rs (added --simulate-preset, --simulate-profile, --json flags; rewrote arg parser)
+  - android/app/src/main/java/id/zai/apkdetector/data/NativeBridge.kt (added scanBlockingOnly + scanSimulated Kotlin functions + DeviceProfile.presets object with 6 curated profiles)
+traceability: IMPL-001 to IMPL-012
+phase_trace: IDLE→SPECIFY→PLAN→IMPLEMENT→VERIFY→DELIVER
+
+Work Log:
+- IMPL-001: Added Category::AppDefense to signatures/types.rs + ALL_CATEGORIES in signatures/lib.rs + inline_rules! in loader.rs.
+- IMPL-002: Created app_defense.yaml with 9 rules discovered via direct `strings classes*.dex | grep <kw>` dissection of OCTO's 7 DEX files (87MB total). Patterns: isDebuggerConnected, ro.debuggable, tun0/VpnService, isFromMockProvider, BIND_ACCESSIBILITY_SERVICE, MediaProjection, MediaDrm/Widevine, com.samsung.android.knox/TIMA, isGooglePlayServicesAvailable.
+- IMPL-003: Created detector/src/app_defense.rs (DEX-string scanner); wired into detector/src/lib.rs (full_scan_with_budget calls app_defense::scan last); added "App Defense" label in report.rs category_label.
+- IMPL-004: Added 9 bypass hints in bypass_hints.rs — one per AppDefense rule, each with concrete Frida/Magisk/Xposed technique recommendations.
+- IMPL-005/006: FREEZE FIX. Root cause identified: 9 detector modules each independently called scan_dex_strings, which re-read + re-parse all 7 DEX files. For OCTO: 9 × 87MB = 783MB of redundant reads + 9× DEX string parsing. Fix: (a) thread-local DEX_CACHE in common.rs keyed by apk_path — first detector populates, subsequent 8 reuse; (b) ScanBudget struct (max_total_dex_bytes=256MB, max_total_strings=4M, max_dex_files=10) enforced via try_use_dex_bytes + try_use_strings; (c) BudgetGuard RAII installs/resets both thread-locals. OCTO scan time went from 30s+ → 0.9s. Also caught + fixed two bugs in budget logic: (1) budget was over-charged 9× until cache was added, (2) soft-miss cache (primed but unfilled) was treated as hard hit.
+- IMPL-007/008: Created simulator.rs with DeviceProfile struct (20 Option<bool> fields), 6 presets (clean, rooted-magisk, rooted-no-magisk, emulator, frida, dev-options-on), to_json/from_json with strict JSON parsing, simulate() pure function, verdict_table with 40+ rule_id → verdict_fn mappings covering all 9 categories. Verdicts: Triggered/Bypassed/Unknown. 14 unit tests covering all preset behaviors.
+- IMPL-009/010: Added JNI exports Java_id_zai_apkdetector_data_NativeBridge_scanApkBlockingOnly (calls to_markdown_blocking_only) and Java_id_zai_apkdetector_data_NativeBridge_scanApkSimulated (parses profile JSON, runs scan, calls simulate, returns MD). Both wrapped in catch_unwind for panic safety. Updated NativeBridge.kt: 6 external decls, scanBlockingOnly/scanSimulated Kotlin wrappers, DeviceProfile.presets object with 6 JSON strings ready for JNI.
+- IMPL-011: Rewrote cli/main.rs arg parser to support --simulate-preset <name>, --simulate-profile <json>, --json, --out. Validates --json requires --simulate-*. Preset name resolves via DeviceProfile::preset.
+- IMPL-012: Total 40 tests pass (was 21 prior session): 4 budget tests in common.rs, 14 simulator tests in simulator.rs, 6 report tests, 13 apk-parser tests, 2 signatures tests, 1 jni-bridge build test.
+
+Bug found + fixed during IMPL:
+- Double-drain bug from prior session still in place (preserved). Three NEW bugs found + fixed:
+  1. Budget over-charge (no cache) — 9 detectors each charged for full DEX bytes; root cause of freeze regression. Fixed by adding DEX_CACHE thread-local.
+  2. Soft-miss cache bug — primed cache with empty strings was treated as hard hit, causing all subsequent detectors to skip DEX entirely. Fixed by requiring !d.strings.is_empty() for hard hit.
+  3. clippy useless_format — `format!("Error: ...")` on static string. Fixed by using `.to_string()`.
+
+ci_iterations: 0 (local verification only — push pending)
+
+Pre-push local verification (9 checks):
+  1. bash -n on all bash blocks: N/A (no bash blocks in code changes)
+  2. python3 -c blocks: N/A
+  3. grep patterns: N/A
+  4. banner version: N/A (no SKILL.md change)
+  5. tag check: N/A (no version bump)
+  6. clawhub registry: N/A (not a skill change)
+  7. workflow YAML: N/A (no workflow changes)
+  8. markdown fences: N/A
+  9. post-push plan: will poll CI after push
+  - cargo fmt --check --all: PASS
+  - cargo clippy --workspace --all-targets -- -D warnings: PASS (0 warnings)
+  - cargo test --workspace --lib: 40/40 PASS
+  - cargo build -p apk-detector-cli --release: PASS (~577KB binary)
+  - OCTO base.apk full scan: PASS (27 findings, 25 blocking, 0.9s)
+  - OCTO simulator emulator preset: PASS (15 triggered, 12 bypassed, 0 unknown)
+  - OCTO simulator clean preset: PASS (1 triggered, 26 bypassed)
+  - OCTO simulator rooted-magisk preset: PASS (2 triggered, 25 bypassed)
+  - OCTO simulator JSON output: PASS (10498 bytes valid JSON)
+  - All 9 new AppDefense rules fire on OCTO: PASS
+
+discoveries:
+  - observation: OCTO carries Samsung KNOX/TIMA attestation + Widevine DRM attestation + accessibility-service defense — these are high-severity signals for banking apps that weren't in the original 8-category signature set. Adding them caught 9 new findings on OCTO.
+    found_while: running `strings classes*.dex | grep <kw>` for 30+ banking-defense keywords
+    surface: same (new app_defense.yaml + app_defense.rs I was creating)
+    action: fix-now
+    outcome: 9 new rules + bypass hints added, all match OCTO
+  - bug: scan_dex_strings was called 9 times (once per detector module), each time reading + parsing all DEX files. This was the ACTUAL root cause of the freeze — not the budget, not the algorithm complexity.
+    found_while: running OCTO scan with new budget enabled — only 5 findings returned (down from 18), indicating budget exhausted mid-scan
+    surface: same (rust/detector/src/common.rs scan_dex_strings I was modifying for budget enforcement)
+    action: fix-now
+    outcome: added DEX_CACHE thread-local in common.rs; first detector populates, subsequent 8 reuse. Scan time 30s → 0.9s.
+
+scope_drift: NONE
+
+pivot: NONE
+
+git_state:
+  branch: main
+  local_head: c291e6d (worklog-only commit from prior session, NOT pushed)
+  new_commits_pending: this iteration's changes (not yet committed)
+  remote_main: c650e9d
+  ci_run: pending push (will be #34 or #35 depending on whether prior session's worklog-only commit is included)
+  prior_fix_commits: 2232e40 + abfd045 + d357227 + c650e9d (still in place, working as intended)
+
+root_cause_analysis:
+  symptom_1: "APK terkadang freeze ketika scanning"
+  proximate_cause: 9 detector modules each independently read + parse all DEX files. For OCTO: 9 × 87MB DEX = 783MB of redundant reads + 9× DEX string parsing = ~30s on mid-range Android.
+  fix: DEX_CACHE thread-local in common.rs. First detector's scan_dex_strings call populates the cache; subsequent 8 detectors reuse. Bonus: ScanBudget struct bounds pathological inputs (max 256MB DEX, max 4M strings, max 10 DEX files). OCTO scan: 30s → 0.9s.
+  
+  symptom_2: "OCTO.apk ada deteksi anti non-playstore apk allowed, cari dan analisa blocking lainnya juga"
+  findings: 
+    - Anti-non-Play-Store detection: already covered as `clone-installer-source` (MEDIUM severity) via `getInstallerPackageName` + `com.android.vending` pattern. OCTO has 3 hits on getInstallerPackageName + 4 hits on com.android.vending.
+    - 9 ADDITIONAL blocking patterns found via OCTO dissection, all added as new AppDefense rules: anti-debug (isDebuggerConnected + TracerPid), debug-flag (ro.debuggable + Settings.Global.ADB_ENABLED), VPN (tun0 + VpnService), mock-location (isFromMockProvider), accessibility-service (BIND_ACCESSIBILITY_SERVICE — banking-trojan defense), MediaProjection (screen recording defense), DRM attestation (Widevine MediaDrm), KNOX/TIMA attestation (Samsung), Play Services presence (isGooglePlayServicesAvailable).
+    - OCTO trigger counts per new rule: ALL 9 fire on OCTO base.apk.
+  
+  symptom_3: "Apakah possible APK Scanner melakukan simulasi deteksi sesuai hasil scan target apk dan memberikan result bagian mana saja yang lolos dan bagian mana yang tidak lolos pada device?"
+  answer: YES — implemented as `detector::simulator` module + JNI export `scanApkSimulated(path, profileJson)` + CLI flag `--simulate-preset`.
+  how_it_works:
+    - User supplies a DeviceProfile (20 Option<bool> fields: rooted, magisk_denylist_on, play_integrity_passes, safetynet_passes, installer_is_play_store, in_clone_runtime, is_emulator, frida_running, xposed_loaded, mock_location_on, vpn_active, debugger_attached, developer_options_on, accessibility_service_on, media_projection_active, play_services_available, is_samsung_knox, widevine_l1, repackaged, self_integrity_broken).
+    - For each Finding in the scan Report, the simulator looks up the rule_id in a verdict table and calls the corresponding verdict function, which inspects the relevant profile fields and returns Triggered/Bypassed/Unknown.
+    - Triggered = "this detection WOULD fire on your device — user is blocked/restricted unless they change setup or apply a bypass."
+    - Bypassed = "detection rule exists in APK but user's setup defeats it (e.g., Magisk DenyList hides root from a root-check)."
+    - Unknown = "no simulator mapping for this rule_id, or the relevant profile field is unset (None)."
+    - 6 curated presets cover common device classes: clean, rooted-magisk, rooted-no-magisk, emulator, frida, dev-options-on.
+    - Output formats: Markdown (human-readable, 3 sections by verdict) + JSON (machine-readable, for CI / Kotlin UI).
+    - Each Triggered verdict includes a bypass hint from bypass_hints.rs explaining how to defeat that specific detection.
+  octo_simulation_results:
+    - clean preset: 1 triggered (KNOX on non-Samsung), 26 bypassed — clean device works fine except for KNOX which only passes on Samsung.
+    - rooted-magisk preset: 2 triggered (root-test-keys-build — DenyList doesn't change ro.build.tags; KNOX), 25 bypassed — DenyList + Play Integrity Fix bypass most checks.
+    - rooted-no-magisk preset: many triggered (root checks + Play Integrity fails + SafetyNet fails + KNOX) — bare root will not work.
+    - emulator preset: 15 triggered (all anti-emulator suite + Play Integrity + SafetyNet + KNOX + anti-debug + debug-flag), 12 bypassed — emulator is heavily blocked.
+    - frida preset: anti-hook checks trigger, others bypass.
+    - dev-options-on preset: anti-debug + debug-flag trigger, others bypass.
+
+OCTO analysis summary (27 findings, 25 blocking, 9 NEW AppDefense):
+  - Root Detection (2): root-check-su-binary (MEDIUM), root-check-ro-secure-prop (LOW)
+  - Play Integrity (3): play-integrity-api-call (HIGH), play-integrity-manager-impl (HIGH), play-integrity-safety-net-legacy (MEDIUM)
+  - Anti-Tamper (4): anti-tamper-pm-get-signatures-v2 (HIGH), anti-tamper-self-integrity (HIGH), anti-tamper-signature-get-installed (HIGH), anti-tamper-dex-crc (MEDIUM)
+  - Anti-Hooking (1): anti-hook-frida-maps-scan (HIGH)
+  - Anti-Emulator (7): bluestacks (HIGH), files (HIGH), build-fingerprint (MEDIUM), network (MEDIUM), sensors (MEDIUM), telephony (MEDIUM), build-manufacturer (LOW)
+  - Clone / Repackage (1): clone-installer-source (MEDIUM) — THE anti-non-Play-Store detection
+  - App Defense (9, NEW): anti-debug (HIGH), debug-flag (MEDIUM), VPN (MEDIUM), mock-location (MEDIUM), accessibility (HIGH), MediaProjection (MEDIUM), DRM attestation (HIGH), KNOX/TIMA (HIGH), Play Services presence (MEDIUM)
+
+deliverables:
+  - /home/z/my-project/download/octo-full-report.md (13.7KB — full 27-finding report)
+  - /home/z/my-project/download/octo-block-restrict-report.md (13.5KB — 25 blocking findings, 2 LOW hidden)
+  - /home/z/my-project/download/octo-simulation-clean.md (6.3KB — clean-device simulation: 1 triggered, 26 bypassed)
+  - /home/z/my-project/download/octo-simulation-emulator.md (8.2KB — emulator simulation: 15 triggered, 12 bypassed)
+  - /home/z/my-project/download/octo-simulation-rooted-magisk.md (6.3KB — rooted+DenyList simulation: 2 triggered, 25 bypassed)
+  - /home/z/my-project/download/octo-simulation-rooted-magisk.json (10.5KB — JSON variant for programmatic consumption)
+
+next_step: |
+  User should:
+    1. Review the OCTO simulation reports under /home/z/my-project/download/ — particularly
+       octo-simulation-emulator.md (15 triggered — emulator is the most-blocked device class)
+       and octo-simulation-rooted-magisk.md (only 2 triggered — Magisk DenyList + Play Integrity
+       Fix is the recommended setup for QA testing of OCTO).
+    2. Compare with the full report at octo-full-report.md (27 findings, 9 in the new AppDefense
+       category) — the new rules cover runtime behavior checks (debug/VPN/location/accessibility/
+       screen-capture/DRM/KNOX/Play-Services) that the prior 8-category signature set missed.
+    3. To run a custom simulation: 
+         apk-detector-cli <apk> --simulate-profile '{"rooted":true,"magisk_denylist_on":true,...}'
+       or use a preset:
+         apk-detector-cli <apk> --simulate-preset emulator [--json] [--out file]
+    4. To re-scan OCTO:
+         /home/z/my-project/rust/target/release/apk-detector-cli /tmp/my-project/apk-analysis/unpacked/base.apk
+       (full scan, 0.9s — was 30s+ before the DEX-cache fix)
+    5. The next iteration should:
+       - Add Kotlin Compose UI for the simulator (preset selector + custom-profile editor + result renderer).
+       - Push the new commits to GitHub (CI run #34 or #35).
+       - Consider adding more AppDefense rules: logcat scanning, ptrace self-attach, system service
+         spoofing, Samsung Secure Folder, multiple-user-space detection.
+
+deferred_discoveries:
+  - Kotlin Compose UI for simulator: not implemented. NativeBridge.kt exposes scanSimulated()
+    and DeviceProfile.presets, but no Compose screen calls them yet. Next iteration should add
+    a SimulationScreen with a preset dropdown + custom-profile JSON editor + Markdown result
+    renderer (reusing the existing ReportScreen rendering).
+  - Push to GitHub + CI run: not done. Local verification is green (40 tests, fmt, clippy,
+    OCTO scan + simulation). Push is the user's call.
+  - DEX-string cache invalidation: the cache is cleared on BudgetGuard drop, so each scan
+    starts fresh. But if two APKs are scanned in quick succession on the same thread (rare —
+    JNI usually spawns a worker thread per scan), the second scan correctly sees the cache
+    is for a different apk_path and re-reads. This is correct behavior; no fix needed.
+  - Cache eviction policy: the DEX cache holds ALL strings in memory for the duration of
+    the scan. For OCTO this is ~1.5M strings × ~50 bytes avg = ~75MB peak RSS. Acceptable
+    for an Android app (per-process memory limit is usually 256-512MB). If a future APK
+    has 10M+ strings, the cache could OOM — at that point, switch to a streaming pattern
+    matcher (compute rule hits per-DEX rather than aggregating). Deferred.
+  - Per-preset weight/cost scoring: simulator currently shows Triggered/Bypassed/Unknown
+    counts but doesn't compute an overall "device compatibility score" (e.g., "this device
+    is 87% compatible with OCTO"). Easy to add — count triggered/total. Deferred.

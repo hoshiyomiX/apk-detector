@@ -350,6 +350,7 @@ fn category_label(c: Category) -> &'static str {
         Category::AntiHooking => "Anti-Hooking",
         Category::AntiEmulator => "Anti-Emulator",
         Category::CloneRepackage => "Clone / Repackage",
+        Category::AppDefense => "App Defense",
     }
 }
 
