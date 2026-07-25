@@ -35,6 +35,7 @@ fun DiffScreen(onBack: () -> Unit) {
     var newLabel by remember { mutableStateOf("new APK") }
     var result by remember { mutableStateOf<ScanResult?>(null) }
     var busy by remember { mutableStateOf(false) }
+    var copying by remember { mutableStateOf(false) }
 
     fun pickApk(target: String) {
         // Use ActivityResultContracts.OpenDocument via a launcher we create below.
@@ -48,16 +49,27 @@ fun DiffScreen(onBack: () -> Unit) {
         "application/octet-stream",
     )
 
+    // PANIC/FREEZE SAFETY (IMPL-004):
+    // Same as PickerScreen — `onResult` runs on the MAIN THREAD, and
+    // `copyUriToCacheExt` does file I/O that can block for seconds on a
+    // large APK. We dispatch to Dispatchers.IO and gate the UI with
+    // `copying` so the user sees a "Copying…" state on the button.
     val pickOld = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
         onResult = { uri ->
             if (uri != null) {
-                // Preserve source extension (.apk / .apks) so the Rust
-                // `open_any` dispatcher routes .apks through the container path.
-                val cache = copyUriToCacheExt(context, uri, "diff_old")
-                if (cache != null) {
-                    oldPath = cache.absolutePath
-                    oldLabel = cache.name
+                copying = true
+                scope.launch {
+                    // Preserve source extension (.apk / .apks) so the Rust
+                    // `open_any` dispatcher routes .apks through the container path.
+                    val cache = withContext(Dispatchers.IO) {
+                        copyUriToCacheExt(context, uri, "diff_old")
+                    }
+                    if (cache != null) {
+                        oldPath = cache.absolutePath
+                        oldLabel = cache.name
+                    }
+                    copying = false
                 }
             }
         },
@@ -66,10 +78,16 @@ fun DiffScreen(onBack: () -> Unit) {
         ActivityResultContracts.OpenDocument(),
         onResult = { uri ->
             if (uri != null) {
-                val cache = copyUriToCacheExt(context, uri, "diff_new")
-                if (cache != null) {
-                    newPath = cache.absolutePath
-                    newLabel = cache.name
+                copying = true
+                scope.launch {
+                    val cache = withContext(Dispatchers.IO) {
+                        copyUriToCacheExt(context, uri, "diff_new")
+                    }
+                    if (cache != null) {
+                        newPath = cache.absolutePath
+                        newLabel = cache.name
+                    }
+                    copying = false
                 }
             }
         },
@@ -94,13 +112,15 @@ fun DiffScreen(onBack: () -> Unit) {
         ) {
             OutlinedButton(
                 onClick = { pickOld.launch(pickMimes) },
+                enabled = !copying && !busy,
                 modifier = Modifier.fillMaxWidth(),
-            ) { Text("Pick OLD: $oldLabel") }
+            ) { Text(if (copying) "Copying…" else "Pick OLD: $oldLabel") }
 
             OutlinedButton(
                 onClick = { pickNew.launch(pickMimes) },
+                enabled = !copying && !busy,
                 modifier = Modifier.fillMaxWidth(),
-            ) { Text("Pick NEW: $newLabel") }
+            ) { Text(if (copying) "Copying…" else "Pick NEW: $newLabel") }
 
             Button(
                 onClick = {
@@ -112,7 +132,7 @@ fun DiffScreen(onBack: () -> Unit) {
                         busy = false
                     }
                 },
-                enabled = oldPath != null && newPath != null && !busy,
+                enabled = oldPath != null && newPath != null && !busy && !copying,
                 modifier = Modifier.fillMaxWidth(),
             ) { Text(if (busy) "Diffing…" else "Run diff") }
 

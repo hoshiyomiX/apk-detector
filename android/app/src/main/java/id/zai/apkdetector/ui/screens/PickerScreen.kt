@@ -20,6 +20,9 @@ import androidx.compose.ui.unit.dp
 import id.zai.apkdetector.ApkDetectorApp
 import id.zai.apkdetector.data.ApkSource
 import id.zai.apkdetector.data.copyUriToCacheExt
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -29,24 +32,41 @@ fun PickerScreen(
     onHistory: () -> Unit,
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var pendingPath by remember { mutableStateOf<String?>(null) }
+    var copying by remember { mutableStateOf(false) }
 
     // SAF picker for APK and .apks files.
     // - `application/vnd.android.package-archive` covers regular .apk files.
     // - `application/zip` covers .apks (BundleTool output is a ZIP-of-APKs).
     // - `application/octet-stream` is a fallback for .apks files registered
     //   with a generic binary MIME type on some Android versions.
+    //
+    // PANIC/FREEZE SAFETY (IMPL-003):
+    // The `onResult` callback runs on the MAIN THREAD. The original code
+    // called `copyUriToCacheExt` synchronously inside it — for a 100MB APK
+    // this blocked the main thread for several seconds, causing freeze/ANR.
+    // We now launch a coroutine on Dispatchers.IO to perform the cache
+    // copy, then set `pendingPath` on the main thread. The UI shows a
+    // "Copying…" state via the `copying` flag so the user knows what's
+    // happening.
     val pickApk = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
         onResult = { uri ->
             if (uri != null) {
-                // Copy URI → cache file with preserved extension, then scan.
-                // The Rust `open_any` dispatcher detects `.apks` containers
-                // by extension, so we MUST preserve `.apk`/`.apks` rather
-                // than hardcoding `.apk`.
-                val cache = copyUriToCacheExt(context, uri, "picked")
-                if (cache != null) {
-                    pendingPath = cache.absolutePath
+                copying = true
+                scope.launch {
+                    // Copy URI → cache file with preserved extension, then scan.
+                    // The Rust `open_any` dispatcher detects `.apks` containers
+                    // by extension, so we MUST preserve `.apk`/`.apks` rather
+                    // than hardcoding `.apk`.
+                    val cache = withContext(Dispatchers.IO) {
+                        copyUriToCacheExt(context, uri, "picked")
+                    }
+                    if (cache != null) {
+                        pendingPath = cache.absolutePath
+                    }
+                    copying = false
                 }
             }
         },
@@ -82,20 +102,21 @@ fun PickerScreen(
                         ),
                     )
                 },
+                enabled = !copying,
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Icon(Icons.Default.Search, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
-                Text("Pick APK / .apks")
+                Text(if (copying) "Copying to cache…" else "Pick APK / .apks")
             }
 
-            OutlinedButton(onClick = onDiff, modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(onClick = onDiff, enabled = !copying, modifier = Modifier.fillMaxWidth()) {
                 Icon(Icons.Default.CompareArrows, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
                 Text("Diff two versions")
             }
 
-            OutlinedButton(onClick = onHistory, modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(onClick = onHistory, enabled = !copying, modifier = Modifier.fillMaxWidth()) {
                 Icon(Icons.Default.History, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
                 Text("History")

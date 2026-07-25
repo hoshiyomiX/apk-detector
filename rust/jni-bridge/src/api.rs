@@ -295,6 +295,23 @@ fn json_escape(s: &str) -> String {
 // ---------------------------------------------------------------------------
 // 1) scanApk(path: String): String  — Markdown report (or {"error": "..."})
 // ---------------------------------------------------------------------------
+//
+// PANIC SAFETY (IMPL-001):
+// Any panic raised inside `scanApk_inner` (array OOB on malformed APK, integer
+// overflow, a stray `unwrap()` deep in detector/signatures, or an uncaught
+// panic in `inflate::inflate_bytes` outside the existing catch_unwind) would
+// unwind through the JNI FFI boundary. Per Rust's FFI rules, unwinding across
+// an `extern "system"` call is undefined behavior. In practice on Android this
+// manifests as `SIGABRT` / `SIGSEGV` — the app force-closes with no diagnostic.
+//
+// We wrap the entire scan body in `std::panic::catch_unwind`. A caught panic
+// becomes a `{"error":"internal panic: <msg>"}` JSON string, which the Kotlin
+// side surfaces as a regular `ScanResult.Err` — no process death.
+//
+// `AssertUnwindSafe` is required because the closure captures `&path` and
+// `&mut apk` which are not `UnwindSafe`. This is sound here: after a panic we
+// ABANDON both `path` and `apk` (we never read them again), so any internal
+// inconsistency they might have due to unwinding is irrelevant.
 #[no_mangle]
 pub unsafe extern "system" fn Java_id_zai_apkdetector_data_NativeBridge_scanApk(
     env: JNIEnvPtr,
@@ -309,34 +326,47 @@ pub unsafe extern "system" fn Java_id_zai_apkdetector_data_NativeBridge_scanApk(
         Err(e) => return return_error(env, &format!("path: {}", e)),
     };
 
-    let sigs = match sigs() {
-        Ok(s) => s,
-        Err(e) => return return_error(env, &e),
-    };
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        scan_apk_body(&path)
+    }));
+    match result {
+        Ok(Ok(md)) => return_string(env, &md),
+        Ok(Err(e)) => return_error(env, &e),
+        Err(payload) => {
+            let msg = panic_payload_to_string(payload);
+            log::error!("scanApk panic for {}: {}", path, msg);
+            return_error(env, &format!("internal panic: {}", msg))
+        }
+    }
+}
 
-    let file = match std::fs::File::open(&path) {
-        Ok(f) => f,
-        Err(e) => return return_error(env, &format!("open {}: {}", path, e)),
-    };
+/// Body of `scanApk` extracted so it can be wrapped in `catch_unwind`.
+/// Returns the Markdown report on success, or an error string on a handled
+/// failure (file open, ZIP parse, signature load). Unhandled panics bubble
+/// up to the JNI export's catch_unwind.
+fn scan_apk_body(path: &str) -> Result<String, String> {
+    let sigs = sigs()?;
+    let file = std::fs::File::open(path).map_err(|e| format!("open {}: {}", path, e))?;
     // `open_any` transparently handles both `.apk` (regular) and `.apks`
     // (BundleTool ZIP-of-APKs container) — for `.apks` it extracts base.apk
     // into memory and opens the inner APK. For regular `.apk` it stays as
-    // a streaming `File` read. Type-erased via `Box<dyn Read + Seek>` so
+    // a streaming `File` read. Type-erased via `Box<dyn ReadSeek>` so
     // both paths produce the same `Apk<AnyReader>` type.
     let reader: apk_parser::AnyReader = Box::new(file);
-    let mut apk = match apk_parser::open_any(reader, &path) {
-        Ok(a) => a,
-        Err(e) => return return_error(env, &format!("apk parse {}: {}", path, e)),
-    };
-
-    let report = full_scan(&path, &mut apk, sigs);
-    let md = report.to_markdown(sigs);
-    return_string(env, &md)
+    let mut apk = apk_parser::open_any(reader, path)
+        .map_err(|e| format!("apk parse {}: {}", path, e))?;
+    let report = full_scan(path, &mut apk, sigs);
+    Ok(report.to_markdown(sigs))
 }
 
 // ---------------------------------------------------------------------------
 // 2) diffApks(oldPath: String, newPath: String): String  — Markdown diff
 // ---------------------------------------------------------------------------
+//
+// PANIC SAFETY (IMPL-002):
+// Same catch_unwind wrapper as `scanApk`. Both APK scans run inside the
+// closure, so a panic on either APK (or in `ReportDiff::from_findings`)
+// is caught and converted to a JSON error.
 #[no_mangle]
 pub unsafe extern "system" fn Java_id_zai_apkdetector_data_NativeBridge_diffApks(
     env: JNIEnvPtr,
@@ -356,23 +386,47 @@ pub unsafe extern "system" fn Java_id_zai_apkdetector_data_NativeBridge_diffApks
         Err(e) => return return_error(env, &format!("newPath: {}", e)),
     };
 
-    let sigs = match sigs() {
-        Ok(s) => s,
-        Err(e) => return return_error(env, &e),
-    };
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        diff_apks_body(&old_path, &new_path)
+    }));
+    match result {
+        Ok(Ok(md)) => return_string(env, &md),
+        Ok(Err(e)) => return_error(env, &e),
+        Err(payload) => {
+            let msg = panic_payload_to_string(payload);
+            log::error!(
+                "diffApks panic for old={}, new={}: {}",
+                old_path,
+                new_path,
+                msg
+            );
+            return_error(env, &format!("internal panic: {}", msg))
+        }
+    }
+}
 
-    let old_report = match scan_to_findings(&old_path, sigs) {
-        Ok(f) => f,
-        Err(e) => return return_error(env, &format!("old APK: {}", e)),
-    };
-    let new_report = match scan_to_findings(&new_path, sigs) {
-        Ok(f) => f,
-        Err(e) => return return_error(env, &format!("new APK: {}", e)),
-    };
-
+/// Body of `diffApks` extracted so it can be wrapped in `catch_unwind`.
+fn diff_apks_body(old_path: &str, new_path: &str) -> Result<String, String> {
+    let sigs = sigs()?;
+    let old_report = scan_to_findings(old_path, sigs)
+        .map_err(|e| format!("old APK: {}", e))?;
+    let new_report = scan_to_findings(new_path, sigs)
+        .map_err(|e| format!("new APK: {}", e))?;
     let diff = ReportDiff::from_findings(&old_report, &new_report);
-    let md = diff.to_markdown(&old_path, &new_path);
-    return_string(env, &md)
+    Ok(diff.to_markdown(old_path, new_path))
+}
+
+/// Downcast a panic payload (`Box<dyn Any + Send>`) to a readable string.
+/// Covers the three common panic payload types produced by std: `&'static str`,
+/// `String`, and the fallback "unknown panic".
+fn panic_payload_to_string(payload: Box<dyn std::any::Any + Send>) -> String {
+    if let Some(s) = payload.downcast_ref::<&'static str>() {
+        (*s).to_string()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "unknown panic".to_string()
+    }
 }
 
 fn scan_to_findings(path: &str, sigs: &SigSet) -> Result<Vec<detector::Finding>, String> {
