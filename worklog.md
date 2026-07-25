@@ -967,3 +967,114 @@ deferred_discoveries:
     file named "foo.bin" that's actually an .apks wouldn't be detected. Could
     sniff by opening as ZIP and checking if first entry is *.apk. Deferred —
     extension-based detection is sufficient for the SAF picker use case.
+
+---
+Task ID: cdh-offset-fix+apks-read-fix
+Agent: main (stellar-trails v9.8.0, Standard tier, Coding type, Continuation=YES)
+Task: Fix 'bad CDH at offset 25564369' APK crash + 'io: failed to fill whole buffer' APKS crash
+
+Work Log:
+- Read prior worklog: previous fixes (EOCD off-by-one commit 2232e40, EOCD comment_len verification + ZIP64 + .apks support commit 4b0f536/abfd045) all in place. CI #28 was green.
+- Investigated zip_reader.rs::open() CDH parsing loop (lines 220-303). Found root cause: ALL CDH field reads EXCEPT lfh_offset were off by 4 bytes. The code reads `hdr = [0u8; 42]` (42 bytes AFTER the 4-byte signature) but used offsets as if hdr INCLUDED the signature. Concretely:
+    - name_len read from hdr[20..22] → actually uncompressed_size low 2 bytes (BOGUS)
+    - extra_len read from hdr[22..24] → actually uncompressed_size high 2 bytes (BOGUS)
+    - comment_len read from hdr[24..26] → actually compressed_size low 2 bytes (BOGUS)
+    - compressed_size read from hdr[12..16] → actually CRC-32 (BOGUS)
+    - uncompressed_size read from hdr[16..20] → actually compressed_size
+    - method read from hdr[2..4] → actually version_needed (always non-zero → marked STORED entries as compressed)
+    - lfh_offset read from hdr[38..42] → CORRECT (coincidentally)
+- Why CI #28 tests didn't catch this: all 10 pre-existing tests use cd_entries=0 (empty ZIPs). CDH loop never executed. Bug went undetected across 4 CI iterations.
+- Implemented IMPL-001: corrected all CDH field offsets per PKWARE APPNOTE.TXT 4.3.12 (added inline reference table in code comment for future maintainers). Each misread field now reads from hdr[4..N] instead of hdr[0..N-4]. lfh_offset unchanged (already correct).
+- Implemented IMPL-002: added `build_zip_one_stored_entry` helper + `crc32` helper in tests module to construct synthetic ZIPs with real CDH entries (LFH + data + CDH + EOCD).
+- Implemented IMPL-003: `test_cdh_fields_read_correctly` — verifies single STORED entry's name, compressed_size, uncompressed_size, is_compressed all match what was written to CDH. Fails with off-by-4 bug (name_len=2 from uncompressed_size low bytes, method=20 from version_needed).
+- Implemented IMPL-004: `test_multi_entry_zip_walks_cd` — 3-entry ZIP (a.txt/b.txt/c.txt) must enumerate all 3 entries in order without "bad CDH" error. Direct regression test for user's crash.
+- Implemented IMPL-005: `test_stored_entry_not_compressed` — STORED entry (method=0) must have is_compressed=false. Regression test for the method field offset bug (which would mark all entries as compressed).
+- Implemented IMPL-006: verified via CI (cargo not available in sandbox). Pre-push checks: brace/paren/bracket balance OK (119/119, 825/825, 117/117), 13 #[test] attributes.
+- Implemented IMPL-007: commit + push + CI verification.
+
+ci_iterations: 2
+  - Run #29 (commit 7e35691): FAIL — cargo fmt --check rejected multi-line `fn build_zip_one_stored_entry(\n    name: &str,\n    data: &[u8],\n) -> Vec<u8> {` and multi-line `let files: &[(&str, &[u8])] = &[\n    ...\n];`
+    - Fix: collapsed both to single lines per rustfmt preference (commit d357227)
+  - Run #30 (commit d357227): SUCCESS — 13/13 zip_reader tests pass (10 existing + 3 new), 2/2 signatures tests pass, all 3 ABIs cross-compile, debug APK (16.6MB) + signed release APK (3.5MB) + native libs (917KB) produced
+
+discoveries:
+  - bug: cargo fmt prefers single-line function signatures when they fit under 100 chars
+    found_while: pushing the CDH offset fix
+    surface: same (zip_reader.rs tests module I just added)
+    action: fix-now
+    outcome: fixed in same iteration (commit d357227)
+  - observation: 10 pre-existing tests all use cd_entries=0 — CDH parsing loop never executed in tests
+    found_while: investigating why the off-by-4 bug went undetected across 4 prior CI iterations
+    surface: same (zip_reader.rs tests module)
+    action: fix-now (added 3 new tests with real CDH entries)
+    outcome: fixed in same iteration (commit 7e35691)
+
+scope_drift: NONE
+
+pivot: NONE
+
+git_state:
+  branch: main
+  local_head: d357227 (matches remote)
+  remote_main: d357227
+  ci_run: #30 (success)
+  prior_fix_commits: 2232e40 (EOCD off-by-one) + 4b0f536/abfd045 (EOCD comment_len + ZIP64 + .apks) — still in place, working as intended
+
+root_cause_analysis:
+  symptom_apk: "apk parse <path>: zip read error: bad CDH at offset 25564369 (entry #1; cd_offset=25526272, cd_entries=2114; found signature 0x017260ad, expected 0x02014b50)"
+  symptom_apks: "apk parse <path>: io: failed to fill whole buffer"
+  proximate_cause: CDH field offsets in zip_reader.rs::open() were all off by 4 bytes (every field except lfh_offset was read 4 bytes too early)
+  why_these_specific_errors:
+    - APK "bad CDH at offset 25564369": entry #0's name_len + extra_len + comment_len were misread from uncompressed_size and compressed_size byte fields, producing 38051 bytes of bogus variable-length data. Parser skipped 38097 bytes (46 CDH + 38051 variable) and landed on garbage at offset 25564369, where it read 0x017260ad instead of CDH_SIG (0x02014b50).
+    - APKS "io: failed to fill whole buffer": outer .apks ZIP's CD parsed by luck (entries aligned), but zip.read("base.apk") used the bogus compressed_size (actually CRC-32) for read_exact, hitting EOF before filling the buffer.
+  why_previous_apks_worked: APKs where the first entry's uncompressed_size low 2 bytes happened to be 0 (file size >64KB but <4GB with high 2 bytes holding the value) would produce name_len=0, and if compressed_size low 2 bytes were also small, the misread lengths would coincidentally align entries. Most APKs fail though — only "lucky" alignments worked.
+  verification: 3 new unit tests (test_cdh_fields_read_correctly, test_multi_entry_zip_walks_cd, test_stored_entry_not_compressed) directly exercise the previously-untested CDH parsing loop. All 13 tests pass on CI #30.
+
+next_step: |
+  User should:
+    1. Download the NEW apk-detector-release-apk.zip from CI run #30:
+       https://github.com/hoshiyomiX/apk-detector/actions/runs/30142925211
+    2. CRITICAL: Uninstall the old APK first to clear cached .so:
+       adb uninstall id.zai.apkdetector
+       (The engine version string will change to "0.1.0+d357227" — if it
+        still shows "0.1.0+abfd045" or older, you're running cached .so.)
+    3. Install the NEW release APK (it's signed, installable directly):
+       adb install app-release.apk
+    4. Re-test scanning:
+       - The APK that failed with "bad CDH at offset 25564369" should now scan successfully
+       - The .apks file that failed with "io: failed to fill whole buffer" should now scan successfully
+    5. CHECK the "Engine version" log line:
+       - Should read "0.1.0+d357227" (or similar SHA from this commit)
+       - If it reads "0.1.0+abfd045" or older → you're running the OLD build.
+         Uninstall and reinstall.
+
+  Expected behavior now (with CDH offset fix):
+    - APKs that previously failed with "bad CDH at <offset>": scan completes
+      normally. CDH fields (name_len, extra_len, comment_len, sizes, method,
+      lfh_offset) are now read from the correct byte offsets.
+    - .apks containers that previously failed with "io: failed to fill whole
+      buffer": scan completes. base.apk is extracted using the correct
+      compressed_size (previously was reading CRC-32, causing read_exact to
+      hit EOF).
+    - All previously-working APKs: no regression — 10 pre-existing tests still pass.
+    - STORED entries (method=0): correctly identified as not-compressed.
+      Previously ALL entries were marked as compressed because method read
+      version_needed (typically 20, non-zero) instead of the real method.
+
+  If scanning STILL fails after this fix:
+    - For APK: the error message still includes current_pos, cd_offset,
+      cd_entries, found signature. If current_pos != cd_offset on entry #0,
+      the EOCD's cd_offset is wrong (stale EOCD, false-positive EOCD match,
+      or genuinely corrupt archive).
+    - For APKS: the error will now be a more specific ZIP-parse error from
+      the inner base.apk, not the generic "io: failed to fill whole buffer".
+    - Try opening the file with `unzip -l` on a desktop to verify it's valid.
+
+deferred_discoveries:
+  - .xapk format: still not supported (separate spec from APKPure). Would
+    need separate detection + extraction logic.
+  - Content-based .apks detection: still dispatches by file extension only.
+    Could sniff by opening as ZIP and checking if first entry is *.apk.
+  - ZIP CRC verification: parser doesn't verify CRC-32 on decompressed data.
+    Could add as defense-in-depth, but most APK tools already verify this
+    during install. Deferred — current focus is on parsing reliability.
