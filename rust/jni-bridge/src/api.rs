@@ -412,14 +412,18 @@ pub unsafe extern "system" fn Java_id_zai_apkdetector_data_NativeBridge_listSign
 }
 
 // ---------------------------------------------------------------------------
-// 4) engineVersion(): String  — semver
+// 4) engineVersion(): String  — semver + git SHA
 // ---------------------------------------------------------------------------
 #[no_mangle]
 pub unsafe extern "system" fn Java_id_zai_apkdetector_data_NativeBridge_engineVersion(
     env: JNIEnvPtr,
     _class: jclass,
 ) -> jstring {
-    return_string(env, env!("CARGO_PKG_VERSION"))
+    // Format: "<semver>+<git_sha>" — e.g. "0.1.0+e5114a4".
+    // The SHA is captured at build time by build.rs and lets the user verify
+    // which build is loaded on-device. If the crash log shows an OLD SHA,
+    // the user is testing with a cached .so and must `adb uninstall` first.
+    return_string(env, &format!("{}+{}", env!("CARGO_PKG_VERSION"), env!("BUILD_SHA")))
 }
 
 // ---------------------------------------------------------------------------

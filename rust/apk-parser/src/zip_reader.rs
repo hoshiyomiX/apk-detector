@@ -130,12 +130,13 @@ impl<R: Read + Seek> ZipReader<R> {
     /// APKs produced by streaming writers / repackaging tools. Trusting the
     /// LFH sizes can feed a truncated deflate stream to the decompressor.
     ///
-    /// Decompression uses the `inflate` crate (pure Rust, no `unsafe`), which
-    /// returns `Result` on malformed input instead of panicking or SIGSEGVing.
-    /// This is critical because the JNI process cannot recover from a SIGSEGV;
-    /// `catch_unwind` only catches Rust panics, not OS signals. The previous
-    /// implementation used `flate2` (which delegates to `miniz_oxide`) and
-    /// crashed on certain malformed APKs despite a `catch_unwind` wrapper.
+    /// Decompression uses the `inflate` crate (pure Rust). Although `inflate`
+    /// is mostly safe Rust, it contains `assert!` calls and one `unsafe`
+    /// block that CAN panic on certain malformed inputs. We wrap the call in
+    /// `std::panic::catch_unwind` as defense-in-depth so a malformed APK
+    /// returns an `ApkError` instead of crashing the JNI process. We also
+    /// reject empty streams early (CDH compressed_size=0 is almost always a
+    /// stale-size artifact from streaming writers).
     pub fn read(&mut self, name: &str) -> Result<Vec<u8>, ApkError> {
         let idx = self
             .entries
@@ -172,9 +173,48 @@ impl<R: Read + Seek> ZipReader<R> {
             8 => {
                 // ZIP entries use raw DEFLATE (no zlib header) — use
                 // `inflate::inflate_bytes`, NOT `inflate_bytes_zlib`.
-                // Returns Err on malformed input; never panics, never SIGSEGVs.
-                inflate::inflate_bytes(&compressed)
-                    .map_err(|e| ApkError::Zip(format!("deflate error for {}: {}", name, e)))
+                //
+                // The `inflate` crate is mostly safe Rust but DOES contain
+                // `assert!` calls (lines 215, 236, 654, 656, 661 in its
+                // source) and one `unsafe { set_len }` block (line 657).
+                // On certain malformed DEFLATE inputs these asserts can fire
+                // and panic the JNI process. We wrap the call in
+                // `catch_unwind` as defense-in-depth so a malformed APK
+                // returns an `ApkError` instead of crashing.
+                //
+                // We also reject obviously-bogus streams early: a valid
+                // DEFLATE stream needs at least 1 byte (the block header).
+                // A 0-byte "compressed" entry is almost certainly a CDH/LFH
+                // size mismatch and would cause inflate to fail anyway.
+                if compressed.is_empty() {
+                    return Err(ApkError::Zip(format!(
+                        "empty deflate stream for {} (CDH compressed_size=0 — \
+                         likely a streaming-writer APK with stale sizes)",
+                        name
+                    )));
+                }
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    inflate::inflate_bytes(&compressed)
+                }));
+                match result {
+                    Ok(Ok(bytes)) => Ok(bytes),
+                    Ok(Err(e)) => {
+                        Err(ApkError::Zip(format!("deflate error for {}: {}", name, e)))
+                    }
+                    Err(payload) => {
+                        let msg = if let Some(s) = payload.downcast_ref::<&'static str>() {
+                            s.to_string()
+                        } else if let Some(s) = payload.downcast_ref::<String>() {
+                            s.clone()
+                        } else {
+                            "unknown panic".to_string()
+                        };
+                        Err(ApkError::Zip(format!(
+                            "deflate panic for {}: {}",
+                            name, msg
+                        )))
+                    }
+                }
             }
             m => Err(ApkError::Zip(format!("unsupported compression: {}", m))),
         }

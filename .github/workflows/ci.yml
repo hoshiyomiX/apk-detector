@@ -61,6 +61,55 @@ jobs:
       - name: Install cargo-ndk
         run: cargo install cargo-ndk
 
+      # ── Release signing keystore ─────────────────────────────────────
+      # Generate a keystore via `keytool` and cache it across CI runs so
+      # the signing key stays consistent (allows `adb install -r` upgrades
+      # without uninstalling first).
+      #
+      # The keystore is generated with fixed parameters (alias, passwords,
+      # dname) so it's deterministic given the same keytool version. The
+      # cache key is fixed ("v1") which means the keystore is generated
+      # once and reused for all subsequent runs.
+      #
+      # To use a real release keystore instead:
+      #   1. Generate one locally: keytool -genkey -v -keystore release.jks ...
+      #   2. Base64-encode it: base64 -w0 release.jks > release.b64
+      #   3. Add as GitHub secret: SIGNING_KEYSTORE_BASE64
+      #   4. Add secrets for: SIGNING_KEYSTORE_PASS, SIGNING_KEY_ALIAS, SIGNING_KEY_PASS
+      #   5. Replace this step with a decode step:
+      #        echo "${{ secrets.SIGNING_KEYSTORE_BASE64 }}" | base64 -d > $RUNNER_TEMP/release.jks
+      - name: Restore signing keystore from cache
+        id: keystore-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.android-keystore
+          key: apk-detector-keystore-v1
+
+      - name: Generate signing keystore if missing
+        id: keystore
+        run: |
+          KEYSTORE_DIR="$HOME/.android-keystore"
+          KEYSTORE_FILE="$KEYSTORE_DIR/apk-detector-release.jks"
+          mkdir -p "$KEYSTORE_DIR"
+          if [ ! -f "$KEYSTORE_FILE" ]; then
+            echo "Generating new keystore at $KEYSTORE_FILE"
+            keytool -genkey -v \
+              -keystore "$KEYSTORE_FILE" \
+              -storetype JKS \
+              -keyalg RSA -keysize 2048 -validity 36500 \
+              -alias apk-detector \
+              -storepass apk-detector-ci \
+              -keypass apk-detector-ci \
+              -dname "CN=APK Detector CI, OU=Dev, O=Z.ai, L=Jakarta, ST=Jakarta, C=ID"
+          else
+            echo "Restored cached keystore at $KEYSTORE_FILE"
+          fi
+          echo "store_file=$KEYSTORE_FILE" >> $GITHUB_OUTPUT
+          echo "store_pass=apk-detector-ci" >> $GITHUB_OUTPUT
+          echo "key_alias=apk-detector" >> $GITHUB_OUTPUT
+          echo "key_pass=apk-detector-ci" >> $GITHUB_OUTPUT
+
       - name: Build native libs
         working-directory: rust
         run: |
@@ -71,8 +120,13 @@ jobs:
         working-directory: android
         run: ./gradlew :app:assembleDebug
 
-      - name: Gradle build (release, R8 minified)
+      - name: Gradle build (release, R8 minified, signed)
         working-directory: android
+        env:
+          SIGNING_KEYSTORE_PATH: ${{ steps.keystore.outputs.store_file }}
+          SIGNING_KEYSTORE_PASS: ${{ steps.keystore.outputs.store_pass }}
+          SIGNING_KEY_ALIAS: ${{ steps.keystore.outputs.key_alias }}
+          SIGNING_KEY_PASS: ${{ steps.keystore.outputs.key_pass }}
         run: ./gradlew :app:assembleRelease
 
       - name: Upload debug APK
@@ -83,7 +137,7 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Upload release APK (R8 minified)
+      - name: Upload release APK (R8 minified, signed)
         if: always()
         uses: actions/upload-artifact@v4
         with:

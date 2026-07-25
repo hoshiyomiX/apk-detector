@@ -20,6 +20,38 @@ android {
         vectorDrawables { useSupportLibrary = true }
     }
 
+    // ── Release signing ───────────────────────────────────────────────
+    // The keystore path + credentials are read from environment variables
+    // (set by CI). If any of the four env vars is missing, we fall back to
+    // the debug signing config so local dev builds still work.
+    //
+    // CI generates a keystore via `keytool` and caches it across runs
+    // (see .github/workflows/ci.yml). To use a real release keystore,
+    // set these as GitHub Actions secrets:
+    //   SIGNING_KEYSTORE_PATH  (path to the .jks file on the runner)
+    //   SIGNING_KEYSTORE_PASS  (keystore password)
+    //   SIGNING_KEY_ALIAS      (key alias)
+    //   SIGNING_KEY_PASS       (key password)
+    val signingKeystorePath = System.getenv("SIGNING_KEYSTORE_PATH")
+    val signingKeystorePass = System.getenv("SIGNING_KEYSTORE_PASS")
+    val signingKeyAlias = System.getenv("SIGNING_KEY_ALIAS")
+    val signingKeyPass = System.getenv("SIGNING_KEY_PASS")
+    val hasSigningConfig = !signingKeystorePath.isNullOrEmpty()
+        && !signingKeystorePass.isNullOrEmpty()
+        && !signingKeyAlias.isNullOrEmpty()
+        && !signingKeyPass.isNullOrEmpty()
+
+    signingConfigs {
+        if (hasSigningConfig) {
+            create("release") {
+                storeFile = file(signingKeystorePath!!)
+                storePassword = signingKeystorePass
+                keyAlias = signingKeyAlias
+                keyPassword = signingKeyPass
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
@@ -28,6 +60,14 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            // Sign the release APK with the release keystore if env vars
+            // are set; otherwise fall back to debug signing so the APK is
+            // still installable (just with the debug cert).
+            signingConfig = if (hasSigningConfig) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
     }
 
