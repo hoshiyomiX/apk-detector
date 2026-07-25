@@ -326,9 +326,8 @@ pub unsafe extern "system" fn Java_id_zai_apkdetector_data_NativeBridge_scanApk(
         Err(e) => return return_error(env, &format!("path: {}", e)),
     };
 
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        scan_apk_body(&path)
-    }));
+    let result =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| scan_apk_body(&path)));
     match result {
         Ok(Ok(md)) => return_string(env, &md),
         Ok(Err(e)) => return_error(env, &e),
@@ -353,8 +352,8 @@ fn scan_apk_body(path: &str) -> Result<String, String> {
     // a streaming `File` read. Type-erased via `Box<dyn ReadSeek>` so
     // both paths produce the same `Apk<AnyReader>` type.
     let reader: apk_parser::AnyReader = Box::new(file);
-    let mut apk = apk_parser::open_any(reader, path)
-        .map_err(|e| format!("apk parse {}: {}", path, e))?;
+    let mut apk =
+        apk_parser::open_any(reader, path).map_err(|e| format!("apk parse {}: {}", path, e))?;
     let report = full_scan(path, &mut apk, sigs);
     Ok(report.to_markdown(sigs))
 }
@@ -408,10 +407,8 @@ pub unsafe extern "system" fn Java_id_zai_apkdetector_data_NativeBridge_diffApks
 /// Body of `diffApks` extracted so it can be wrapped in `catch_unwind`.
 fn diff_apks_body(old_path: &str, new_path: &str) -> Result<String, String> {
     let sigs = sigs()?;
-    let old_report = scan_to_findings(old_path, sigs)
-        .map_err(|e| format!("old APK: {}", e))?;
-    let new_report = scan_to_findings(new_path, sigs)
-        .map_err(|e| format!("new APK: {}", e))?;
+    let old_report = scan_to_findings(old_path, sigs).map_err(|e| format!("old APK: {}", e))?;
+    let new_report = scan_to_findings(new_path, sigs).map_err(|e| format!("new APK: {}", e))?;
     let diff = ReportDiff::from_findings(&old_report, &new_report);
     Ok(diff.to_markdown(old_path, new_path))
 }
