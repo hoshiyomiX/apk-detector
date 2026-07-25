@@ -50,22 +50,46 @@ pub struct ZipReader<R: Read + Seek> {
 impl<R: Read + Seek> ZipReader<R> {
     pub fn open(mut reader: R) -> Result<Self, ApkError> {
         let file_size = reader.seek(SeekFrom::End(0))?;
-        // EOCD is at most 22 + 65535 bytes from the end
+        // EOCD is at most 22 + 65535 bytes from the end (22-byte record +
+        // up to 65535-byte comment, per PKWARE APPNOTE.TXT 4.3.16).
         let scan_start = file_size.saturating_sub(22 + 65535);
         reader.seek(SeekFrom::Start(scan_start))?;
         let mut tail = Vec::new();
         reader.read_to_end(&mut tail)?;
 
-        // Find EOCD signature scanning from end
+        // The EOCD record is 22 bytes. Its signature lives at the start of
+        // the record, so the signature can sit at any offset `i` where
+        // `i + 22 <= tail.len()`. The last valid offset is therefore
+        // `tail.len() - 22`, which corresponds to a ZIP file with NO
+        // comment (the common case for system APKs and repackaged APKs).
+        //
+        // We MUST iterate the range inclusively (`0..=last_start`) — using
+        // an exclusive upper bound (`0..last_start`) would skip the very
+        // last position and miss EOCD for any ZIP without a comment.
+        if tail.len() < 22 {
+            return Err(ApkError::Zip(format!(
+                "no EOCD found (file_size={}, need >=22 bytes for a valid ZIP EOCD; \
+                 file too small or truncated)",
+                file_size
+            )));
+        }
+        let last_start = tail.len() - 22;
         let mut eocd_pos = None;
-        for i in (0..tail.len().saturating_sub(22)).rev() {
+        for i in (0..=last_start).rev() {
             let sig = u32_le(&tail[i..i + 4]);
             if sig == EOCD_SIG {
                 eocd_pos = Some(scan_start + i as u64);
                 break;
             }
         }
-        let eocd_pos = eocd_pos.ok_or(ApkError::Zip("no EOCD found".into()))?;
+        let eocd_pos = eocd_pos.ok_or_else(|| {
+            ApkError::Zip(format!(
+                "no EOCD found (file_size={}, scanned last {} bytes for signature 0x06054b50; \
+                 file may be truncated, corrupt, or not a ZIP)",
+                file_size,
+                tail.len()
+            ))
+        })?;
 
         // Read EOCD fields
         reader.seek(SeekFrom::Start(eocd_pos))?;
@@ -224,4 +248,103 @@ fn u16_le(b: &[u8]) -> u16 {
 }
 fn u32_le(b: &[u8]) -> u32 {
     u32::from_le_bytes([b[0], b[1], b[2], b[3]])
+}
+
+#[cfg(test)]
+mod tests {
+    //! Tests for the EOCD search loop. The original implementation used an
+    //! exclusive upper bound (`0..tail.len()-22`) which skipped the very
+    //! last valid offset, causing every ZIP file *without* a comment to fail
+    //! with "no EOCD found". The fix uses an inclusive range (`0..=N`).
+
+    use super::*;
+    use std::io::Cursor;
+
+    /// Build a minimal valid empty ZIP: just the 22-byte EOCD record with
+    /// all-zero fields and zero comment. This is the smallest legal ZIP.
+    fn empty_zip_no_comment() -> Vec<u8> {
+        let mut v = Vec::with_capacity(22);
+        v.extend_from_slice(&EOCD_SIG.to_le_bytes()); // signature
+        v.extend_from_slice(&0u16.to_le_bytes()); // disk number
+        v.extend_from_slice(&0u16.to_le_bytes()); // disk with CD start
+        v.extend_from_slice(&0u16.to_le_bytes()); // CD entries on this disk
+        v.extend_from_slice(&0u16.to_le_bytes()); // total CD entries
+        v.extend_from_slice(&0u32.to_le_bytes()); // CD size
+        v.extend_from_slice(&0u32.to_le_bytes()); // CD offset
+        v.extend_from_slice(&0u16.to_le_bytes()); // comment length
+        assert_eq!(v.len(), 22);
+        v
+    }
+
+    /// An empty ZIP with no comment MUST open successfully. This regression
+    /// test fails with the original off-by-one code (loop range was
+    /// `0..0` = empty) and passes with the fixed code (loop range is
+    /// `0..=0` = `[0]`).
+    #[test]
+    fn test_open_empty_zip_no_comment() {
+        let bytes = empty_zip_no_comment();
+        let cursor = Cursor::new(bytes);
+        let result = ZipReader::open(cursor);
+        assert!(
+            result.is_ok(),
+            "empty ZIP (22 bytes, no comment) must open — got: {:?}",
+            result.as_ref().err()
+        );
+        let zip = result.unwrap();
+        assert!(zip.entries().is_empty(), "empty ZIP has no entries");
+    }
+
+    /// An empty ZIP with a 5-byte comment MUST open successfully. This case
+    /// worked even with the original code (because the EOCD sits at offset 0,
+    /// which is within the original exclusive range). It's included as a
+    /// regression check to make sure the inclusive-range fix didn't break
+    /// the with-comment path.
+    #[test]
+    fn test_open_empty_zip_with_comment() {
+        let comment = b"hello";
+        let mut bytes = empty_zip_no_comment();
+        // Patch comment length field (last 2 bytes of EOCD) to len(comment).
+        let len_pos = bytes.len() - 2;
+        bytes[len_pos..len_pos + 2].copy_from_slice(&(comment.len() as u16).to_le_bytes());
+        bytes.extend_from_slice(comment);
+        let cursor = Cursor::new(bytes);
+        let result = ZipReader::open(cursor);
+        assert!(
+            result.is_ok(),
+            "empty ZIP with comment must open — got: {:?}",
+            result.as_ref().err()
+        );
+    }
+
+    /// A file smaller than 22 bytes (the minimum EOCD size) MUST return an
+    /// error, not panic. The error message should mention `file_size` so the
+    /// user can diagnose truncation.
+    #[test]
+    fn test_open_too_small_returns_err() {
+        let bytes = vec![0u8; 10]; // 10 bytes, way too small
+        let cursor = Cursor::new(bytes);
+        let result = ZipReader::open(cursor);
+        assert!(result.is_err(), "10-byte file must error");
+        let msg = format!("{}", result.unwrap_err());
+        assert!(
+            msg.contains("file_size=10"),
+            "error must mention file_size for diagnostics, got: {}",
+            msg
+        );
+    }
+
+    /// An empty file (0 bytes) MUST return an error, not panic.
+    #[test]
+    fn test_open_empty_file_returns_err() {
+        let bytes: Vec<u8> = Vec::new();
+        let cursor = Cursor::new(bytes);
+        let result = ZipReader::open(cursor);
+        assert!(result.is_err(), "empty file must error");
+        let msg = format!("{}", result.unwrap_err());
+        assert!(
+            msg.contains("file_size=0"),
+            "error must mention file_size=0, got: {}",
+            msg
+        );
+    }
 }
