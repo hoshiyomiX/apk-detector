@@ -724,3 +724,127 @@ next_step: |
     - To use a real release keystore: generate one locally, base64-encode it, add
       as GitHub secret SIGNING_KEYSTORE_BASE64, and replace the "Generate signing
       keystore if missing" step with a decode step (see comments in ci.yml)
+
+---
+Task ID: EOCD-fix-1
+Agent: stellar-trails (main agent)
+Task: Fix "zip read error: no EOCD found" crash reported by user testing APK Detector v0.1.0+af86c51ge
+
+Work Log:
+- Read SKILL.md (v9.8.0) for stellar-trails activation, executed Steps 1-5 (all PASS).
+- Checked git state: branch=main, HEAD=af86c51 (matches user's reported version string
+  "0.1.0+af86c51ge"), working tree clean, CI run #20 succeeded.
+- Read rust/apk-parser/src/zip_reader.rs (current state, post-inflate-swap).
+- Identified bug: EOCD search loop at line 61 used `for i in (0..tail.len().saturating_sub(22)).rev()`
+  which is an EXCLUSIVE upper bound. This skips the very last valid offset
+  (`tail.len() - 22`) — exactly where the EOCD signature sits in a ZIP file
+  with NO comment.
+- Verified hypothesis with Python reproduction script (scripts/verify_eocd_bug.py):
+  * Buggy code returns None for "1MB APK with no comment" (file_size=1048598)
+  * Fixed code (inclusive range) returns correct offset 1048576
+  * Both buggy and fixed code find EOCD for ZIPs WITH a comment (which is why
+    previous APKs with "Built by Gradle" comments scanned successfully).
+- Applied Proximate Cause Triage:
+  * Candidate A (file truncated): 1 hop, 1 assumption, but NOT fixable
+  * Candidate B (off-by-one bug): 1 hop, 1 assumption, FIXABLE → FIX NOW
+  * Candidate C (ZIP64): >1 hop, deferred
+- Implemented fix in rust/apk-parser/src/zip_reader.rs:
+  * IMPL-001: Added guard `if tail.len() < 22` returning diagnostic error with file_size
+  * IMPL-002: Changed loop range to inclusive `(0..=last_start).rev()` where `last_start = tail.len() - 22`
+  * IMPL-003: Enriched "no EOCD found" error message with `file_size` and `tail.len()` for diagnostics
+  * IMPL-004: Added `#[cfg(test)] mod tests` block with 4 unit tests:
+    - test_open_empty_zip_no_comment (regression — fails before fix, passes after)
+    - test_open_empty_zip_with_comment (regression check)
+    - test_open_too_small_returns_err (10-byte file → diagnostic error)
+    - test_open_empty_file_returns_err (0-byte file → diagnostic error)
+- Committed as 333d67d, pushed to origin/main.
+- CI run #21 FAILED at clippy step with E0277: `unwrap_err()` requires `T: Debug`,
+  but `ZipReader<R: Read + Seek>` doesn't implement `Debug` (R has no Debug bound).
+- Fixed by replacing `result.unwrap_err()` with `match` expressions in the two
+  error-path tests (no Debug requirement on T). Committed as 2232e40, pushed.
+- CI run #22 SUCCEEDED:
+  * fmt: PASS
+  * clippy: PASS
+  * test (host): PASS — all 4 new tests passed + 2 existing tests
+    Test output: "test zip_reader::tests::test_open_empty_zip_no_comment ... ok"
+                 "test zip_reader::tests::test_open_empty_zip_with_comment ... ok"
+                 "test zip_reader::tests::test_open_too_small_returns_err ... ok"
+                 "test zip_reader::tests::test_open_empty_file_returns_err ... ok"
+                 "test result: ok. 4 passed; 0 failed"
+  * Android build (debug): PASS
+  * Artifacts: debug-apk 15.83 MB, release-apk 3.53 MB (signed), native-libs 0.86 MB
+
+ci_iterations: 2
+  - Run #21 (commit 333d67d): FAIL — clippy E0277 (unwrap_err requires T: Debug)
+    - Fix: replaced `result.unwrap_err()` with `match` pattern in 2 error-path tests
+  - Run #22 (commit 2232e40): SUCCESS — all 4 tests pass, all 3 artifacts produced
+
+discoveries:
+  - bug: clippy E0277 — unwrap_err requires T: Debug, but ZipReader doesn't impl Debug
+    found_while: implementing EOCD off-by-one fix
+    surface: same (zip_reader.rs test module I just added)
+    action: fix-now
+    outcome: fixed in same iteration (commit 2232e40)
+
+scope_drift: NONE
+
+pivot: NONE
+
+git_state:
+  branch: main
+  local_head: 2232e40 (matches remote)
+  remote_main: 2232e40
+  ci_run: #22 (success)
+  prior_fix_commit: af86c51 (inflate swap + CI signing — still in place, working as intended)
+
+root_cause_analysis:
+  symptom: "apk parse <path>: zip read error: no EOCD found"
+  proximate_cause: off-by-one in EOCD search loop (exclusive range `0..N` instead of inclusive `0..=N`)
+  why_previous_apks_worked: those APKs had ZIP comments (e.g., "Built by Gradle"), so the EOCD
+    signature sat at an earlier offset that fell within the exclusive range
+  why_this_apk_failed: this APK has no ZIP comment, so the EOCD signature sits at the very
+    last valid offset (`tail.len() - 22`), which the exclusive range skipped
+  verification: Python reproduction script confirmed — buggy code returns None for no-comment
+    ZIPs, fixed code returns the correct offset
+
+next_step: |
+  User should:
+    1. Download the NEW apk-detector-release-apk.zip from CI run #22:
+       https://github.com/hoshiyomiX/apk-detector/actions/runs/30139875373
+    2. CRITICAL: Uninstall the old APK first to clear cached .so:
+       adb uninstall id.zai.apkdetector
+       (Even though the engine version string will change, the .so cache can
+        cause confusion if not cleared.)
+    3. Install the NEW release APK (it's signed, installable directly):
+       adb install app-release.apk
+    4. Re-test scanning the same APK that previously failed with "no EOCD found".
+    5. CHECK the "Engine version" log line:
+       - Should read "0.1.0+2232e40" (or similar SHA from this commit)
+       - If it reads "0.1.0+af86c51" → you're running the OLD build (before this fix).
+         Uninstall and reinstall.
+
+  Expected behavior now (with off-by-one fix):
+    - APKs WITHOUT a ZIP comment: scan completes normally (previously failed with "no EOCD found")
+    - APKs WITH a ZIP comment: scan completes normally (no regression — still works)
+    - Empty file (0 bytes): scanApk returns JSON {"error":"...no EOCD found (file_size=0, need >=22 bytes...)"}
+    - File < 22 bytes: scanApk returns JSON {"error":"...no EOCD found (file_size=N, need >=22 bytes...)"}
+    - Genuinely corrupt APK (no EOCD signature in last 64KB): scanApk returns JSON
+      {"error":"...no EOCD found (file_size=N, scanned last 65557 bytes for signature 0x06054b50;
+      file may be truncated, corrupt, or not a ZIP)"} — diagnostic enough to identify the issue
+
+  If the APK STILL fails with "no EOCD found" after this fix:
+    - The error message now includes file_size and scan window info
+    - If file_size is suspiciously small (e.g., <1KB), the file is likely truncated
+      (file picker didn't fully copy it)
+    - If file_size is normal (e.g., 50MB) but EOCD is not found, the APK may be
+      genuinely corrupt or use a non-standard format
+    - In that case, try opening the APK with `unzip -l` on a desktop to verify
+      it's a valid ZIP
+
+deferred_discoveries:
+  - ZIP64 format support: APKs >4GB or with >65535 entries use ZIP64 format, which has
+    a different EOCD structure (ZIP64 EOCD locator + ZIP64 EOCD record). The current
+    code only reads the classic EOCD. ZIP64 APKs would fail with "bad CDH at <offset>"
+    or similar, NOT "no EOCD found" (because the classic EOCD is still present in ZIP64
+    archives, just with 0xFFFF/0xFFFFFFFF sentinels). ZIP64 is extremely rare for APKs
+    (Android's apkbuilder doesn't produce ZIP64), so this is deferred.
