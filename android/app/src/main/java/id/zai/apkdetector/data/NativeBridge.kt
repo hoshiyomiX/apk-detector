@@ -21,6 +21,13 @@ package id.zai.apkdetector.data
  *    each finding against the supplied [DeviceProfile] JSON and emits a
  *    simulation report showing which detections would TRIGGER on the device
  *    vs BYPASS vs UNKNOWN. Use [DeviceProfile.presets] for curated profiles.
+ * 6b. `scanApkSimulatedBlocking(path, profileJson)` — same as above but
+ *    FILTERS the scan findings to only `process_kill` / `hard_block` /
+ *    `soft_block` behaviors before running the verdict table. Emits a
+ *    blocking-only simulation report with an "Overall Verdict" banner
+ *    (PASS / FAIL / INCONCLUSIVE / NO BLOCKING DETECTIONS). This is the
+ *    AUTO-CHAIN step used by [Repository.scanWithAutoSimulation] to
+ *    answer "would THIS APK actually block the user on THIS device?".
  * 7. `scanDevice(profileJson)` — evaluates the device-detection verdict
  *    table against the LIVE device's state (described by [profileJson])
  *    WITHOUT requiring an APK. Use [DeviceProbe.gather] to build the
@@ -45,6 +52,7 @@ object NativeBridge {
     private external fun engineVersion(): String
     private external fun scanApkBlockingOnly(path: String): String
     private external fun scanApkSimulated(path: String, profileJson: String): String
+    private external fun scanApkSimulatedBlocking(path: String, profileJson: String): String
     private external fun scanDevice(profileJson: String): String
 
     /** Run a static scan on a single APK file. Returns full Markdown report. */
@@ -75,6 +83,35 @@ object NativeBridge {
      */
     fun scanSimulated(path: String, profileJson: String): ScanResult {
         val raw = scanApkSimulated(path, profileJson)
+        return ScanResult.parse(raw)
+    }
+
+    /**
+     * Run a static scan, FILTER the findings to only user-blocking behaviors
+     * (`process_kill` / `hard_block` / `soft_block`), then simulate which
+     * of those blocking detections would TRIGGER on a device matching
+     * [profileJson]. Returns a Markdown blocking-only simulation report
+     * with an "Overall Verdict" banner (PASS / FAIL / INCONCLUSIVE / NO
+     * BLOCKING DETECTIONS).
+     *
+     * This is the AUTO-CHAIN entry point used by
+     * [Repository.scanWithAutoSimulation] to answer the user's exact flow:
+     *
+     *   1. `scan apk target` — `Repository.scanWithAutoSimulation` calls
+     *      this function with the live device profile.
+     *   2. `data result 'blocking-only filter' diperoleh` — applied
+     *      inside the Rust `simulate_blocking_only` function.
+     *   3. `auto simulasi sesuai data result` — verdict table runs over
+     *      the filtered set.
+     *   4. `rangkuman hasil test` — the Overall Verdict banner in the
+     *      returned Markdown.
+     *
+     * The [profileJson] should typically come from
+     * [DeviceProbe.gather] with a real `play_integrity_passes` value
+     * populated by [PlayIntegrityClient.requestVerdict].
+     */
+    fun scanSimulatedBlocking(path: String, profileJson: String): ScanResult {
+        val raw = scanApkSimulatedBlocking(path, profileJson)
         return ScanResult.parse(raw)
     }
 
@@ -159,6 +196,36 @@ object DeviceProfile {
  * button).
  */
 object ScanResultCache {
+    private val map = mutableMapOf<String, String>()
+
+    fun put(apkPath: String, markdown: String) {
+        map[apkPath] = markdown
+    }
+
+    fun get(apkPath: String): String? = map[apkPath]
+
+    fun clear() {
+        map.clear()
+    }
+}
+
+/**
+ * In-memory cache mapping APK path → blocking-only simulation Markdown.
+ *
+ * Companion to [ScanResultCache] — same design rationale (avoid passing
+ * large Markdown through Navigation Compose route arguments which can
+ * exceed the Bundle size cap and crash on `%XX` decoding).
+ *
+ * Populated by [Repository.scanWithAutoSimulation] alongside the scan
+ * Markdown. Read by [ReportScreen] to render the "Device Simulation"
+ * section under the APK scan report without re-running the simulation.
+ *
+ * ## Lifecycle
+ *
+ * Process-scoped (object singleton). Cleared automatically on process
+ * death. No eviction policy — typical usage is one entry at a time.
+ */
+object SimulationResultCache {
     private val map = mutableMapOf<String, String>()
 
     fun put(apkPath: String, markdown: String) {

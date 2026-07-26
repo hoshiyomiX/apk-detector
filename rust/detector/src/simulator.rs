@@ -616,6 +616,200 @@ impl SimulationReport {
         md
     }
 
+    /// Render the report as a **blocking-only simulation** Markdown — same
+    /// layout as [to_markdown] but with wording that makes it clear this
+    /// simulation is filtered to only the APK's user-blocking detections
+    /// (i.e., findings whose `behavior` is `ProcessKill`, `HardBlock`, or
+    /// `SoftBlock`).
+    ///
+    /// Used by `simulate_blocking_only()` to distinguish its output from
+    /// a full simulation report. The "Findings:" header line uses the
+    /// same format as [to_markdown] so the Kotlin `parseSimCounts`
+    /// regex still works.
+    ///
+    /// ## Verdict summary
+    ///
+    /// The summary banner explains the practical meaning of each verdict
+    /// in the context of "would THIS APK block the user on THIS device?":
+    ///
+    /// - 🔴 **Triggered** — The detection would fire on this device. The
+    ///   user CANNOT use the app (or specific features) without changing
+    ///   their setup or applying a bypass.
+    /// - 🟢 **Bypassed** — The detection rule is present in the APK but
+    ///   the user's device setup defeats it. The user CAN use the app.
+    /// - ⚪ **Unknown** — The simulator couldn't determine the verdict
+    ///   because a needed device signal was unavailable from a non-root
+    ///   app context (e.g., `magisk_denylist_on` requires root to inspect).
+    pub fn to_markdown_blocking_simulation(&self) -> String {
+        let mut md = String::with_capacity(8 * 1024);
+        let _ = writeln!(md, "# APK Detector — Blocking-Only Device Simulation");
+        let _ = writeln!(md);
+        let _ = writeln!(md, "**Engine:** APK Detector v{}", self.engine_version);
+        let _ = writeln!(md, "**Target APK:** `{}`", self.apk_path);
+        let _ = writeln!(md, "**Device profile:** `{}`", self.profile_json);
+        let (triggered, bypassed, unknown) = self.counts();
+        let total = self.entries.len();
+        let _ = writeln!(
+            md,
+            "**Findings:** {} total — {} triggered, {} bypassed, {} unknown",
+            total, triggered, bypassed, unknown
+        );
+        let _ = writeln!(md);
+        let _ = writeln!(
+            md,
+            concat!(
+                "_This simulation is filtered to only the APK's user-blocking ",
+                "detections (behavior: `process_kill` / `hard_block` / ",
+                "`soft_block`). Detections that only record telemetry ",
+                "(`log_only` / `unknown`) are excluded — they don't block ",
+                "the user._"
+            )
+        );
+        let _ = writeln!(md);
+        let _ = writeln!(
+            md,
+            concat!(
+                "_Each rule below was discovered in the APK AND would actually ",
+                "restrict the user if it fires. **Triggered** = your device ",
+                "would be blocked. **Bypassed** = your device defeats the rule. ",
+                "**Unknown** = a needed device signal couldn't be determined ",
+                "from a non-root app context — manually verify._"
+            )
+        );
+        let _ = writeln!(md);
+
+        // Verdict summary banner — the "rangkuman hasil test" line.
+        let overall = if total == 0 {
+            "⚪ NO BLOCKING DETECTIONS — this APK has no rules that would force-stop or hard-block the user."
+        } else if triggered > 0 {
+            "✗ FAIL — at least one blocking detection would fire on this device. The user CANNOT use the app without changing their setup or applying a bypass."
+        } else if unknown > 0 {
+            "⚠ INCONCLUSIVE — no blocking detection definitively fires, but some need device signals that couldn't be probed. Manually verify the Unknown entries."
+        } else {
+            "✓ PASS — all blocking detections are bypassed on this device. The user CAN use the app."
+        };
+        let _ = writeln!(md, "## Overall Verdict");
+        let _ = writeln!(md);
+        let _ = writeln!(md, "**{}**", overall);
+        let _ = writeln!(md);
+
+        // Summary by verdict
+        let _ = writeln!(md, "## Summary");
+        let _ = writeln!(md);
+        let _ = writeln!(md, "| Verdict | Count | Meaning |");
+        let _ = writeln!(md, "|---|---:|---|");
+        let _ = writeln!(
+            md,
+            "| 🔴 Triggered | {} | Detection fires on this device — user is blocked/restricted |",
+            triggered
+        );
+        let _ = writeln!(
+            md,
+            "| 🟢 Bypassed  | {} | Detection rule exists but user's setup defeats it |",
+            bypassed
+        );
+        let _ = writeln!(
+            md,
+            "| ⚪ Unknown   | {} | Needed device signal could not be determined — manually verify |",
+            unknown
+        );
+        let _ = writeln!(md);
+
+        // Per-verdict detail sections — same layout as to_markdown()
+        let _ = writeln!(md, "## Detailed Simulation");
+        let _ = writeln!(md);
+
+        if triggered > 0 {
+            let _ = writeln!(
+                md,
+                "### 🔴 Triggered ({} finding{})",
+                triggered,
+                plural_s(triggered)
+            );
+            let _ = writeln!(md);
+            for e in &self.entries {
+                if let SimulationVerdict::Triggered { why } = &e.verdict {
+                    let _ = writeln!(
+                        md,
+                        "**{} {}** `{}`",
+                        e.finding.severity.emoji(),
+                        e.finding.severity.as_str().to_uppercase(),
+                        e.finding.rule_id
+                    );
+                    let _ = writeln!(md, ": {}", e.finding.rule_name);
+                    let _ = writeln!(md);
+                    let _ = writeln!(md, "- Why it triggers: {}", why);
+                    if let Some(hint_key) = &e.finding.bypass_hint_key {
+                        if let Some(hint) = crate::bypass_hints::lookup(hint_key) {
+                            let _ = writeln!(md, "- **Bypass hint:** {}", hint);
+                        }
+                    }
+                    let _ = writeln!(md);
+                }
+            }
+        }
+
+        if bypassed > 0 {
+            let _ = writeln!(
+                md,
+                "### 🟢 Bypassed ({} finding{})",
+                bypassed,
+                plural_s(bypassed)
+            );
+            let _ = writeln!(md);
+            for e in &self.entries {
+                if let SimulationVerdict::Bypassed { how } = &e.verdict {
+                    let _ = writeln!(
+                        md,
+                        "**{} {}** `{}`",
+                        e.finding.severity.emoji(),
+                        e.finding.severity.as_str().to_uppercase(),
+                        e.finding.rule_id
+                    );
+                    let _ = writeln!(md, ": {}", e.finding.rule_name);
+                    let _ = writeln!(md);
+                    let _ = writeln!(md, "- How it's bypassed: {}", how);
+                    let _ = writeln!(md);
+                }
+            }
+        }
+
+        if unknown > 0 {
+            let _ = writeln!(
+                md,
+                "### ⚪ Unknown ({} finding{})",
+                unknown,
+                plural_s(unknown)
+            );
+            let _ = writeln!(md);
+            for e in &self.entries {
+                if let SimulationVerdict::Unknown { note } = &e.verdict {
+                    let _ = writeln!(
+                        md,
+                        "**{} {}** `{}`",
+                        e.finding.severity.emoji(),
+                        e.finding.severity.as_str().to_uppercase(),
+                        e.finding.rule_id
+                    );
+                    let _ = writeln!(md, ": {}", e.finding.rule_name);
+                    let _ = writeln!(md);
+                    let _ = writeln!(md, "- Note: {}", note);
+                    let _ = writeln!(md);
+                }
+            }
+        }
+
+        if total == 0 {
+            let _ = writeln!(
+                md,
+                "_No user-blocking detections in this APK — the simulation set is empty._"
+            );
+            let _ = writeln!(md);
+        }
+
+        md
+    }
+
     /// Render the report as a **device self-scan** Markdown — same layout as
     /// [to_markdown] but with device-scan wording in the title + summary.
     ///
@@ -849,6 +1043,67 @@ pub fn simulate(report: &Report, profile: &DeviceProfile) -> SimulationReport {
     let entries: Vec<SimulationEntry> = report
         .findings
         .iter()
+        .map(|f| {
+            let verdict = match table.get(f.rule_id.as_str()) {
+                Some(vfn) => vfn(profile),
+                None => SimulationVerdict::Unknown {
+                    note: format!(
+                        "no simulator mapping for rule_id `{}` — manually verify against the device",
+                        f.rule_id
+                    ),
+                },
+            };
+            SimulationEntry {
+                finding: f.clone(),
+                verdict,
+            }
+        })
+        .collect();
+    SimulationReport {
+        apk_path: report.apk_path.clone(),
+        profile_json: profile.to_json(),
+        entries,
+        engine_version: env!("CARGO_PKG_VERSION"),
+    }
+}
+
+/// Run the simulator over a scan report + device profile, but ONLY for
+/// findings whose runtime behavior would actually block or restrict the
+/// user (i.e., `behavior.is_user_blocking()` returns true —
+/// `ProcessKill`, `HardBlock`, `SoftBlock`). Findings with `LogOnly` or
+/// `Unknown` behavior are excluded — they record telemetry but don't
+/// impact the user.
+///
+/// This is the "auto simulation sesuai data result" step in the user's
+/// requested flow:
+///   1. `scan apk target` — produces a `Report` with N findings
+///   2. `data result 'blocking-only filter' diperoleh` — this function
+///      applies the filter (only `is_user_blocking()` findings)
+///   3. `auto simulasi sesuai data result` — this function runs the
+///      verdict table against the supplied `DeviceProfile` for each
+///      filtered finding
+///   4. `rangkuman hasil test` — the caller renders the returned
+///      `SimulationReport` via `to_markdown_blocking_simulation()`
+///
+/// The returned report has the same shape as [simulate]'s output, but
+/// `entries` only includes blocking-behavior findings. The caller can
+/// distinguish the two via [SimulationReport::to_markdown_blocking_simulation]
+/// which renders a different title + summary banner.
+///
+/// ## When to use this vs [simulate]
+///
+/// - Use `simulate` when you want to predict which of an APK's detections
+///   would fire on a device — including telemetry-only rules.
+/// - Use `simulate_blocking_only` when the user wants to know "would THIS
+///   APK actually block me on THIS device?" — i.e., the practical
+///   question of whether they can use the app, ignoring detections that
+///   only record analytics.
+pub fn simulate_blocking_only(report: &Report, profile: &DeviceProfile) -> SimulationReport {
+    let table = verdict_table();
+    let entries: Vec<SimulationEntry> = report
+        .findings
+        .iter()
+        .filter(|f| f.behavior.is_user_blocking())
         .map(|f| {
             let verdict = match table.get(f.rule_id.as_str()) {
                 Some(vfn) => vfn(profile),

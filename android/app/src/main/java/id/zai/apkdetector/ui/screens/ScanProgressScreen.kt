@@ -10,7 +10,6 @@ import androidx.compose.ui.unit.dp
 import id.zai.apkdetector.ApkDetectorApp
 import id.zai.apkdetector.data.ApkSource
 import id.zai.apkdetector.data.ScanResult
-import id.zai.apkdetector.data.ScanResultCache
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
@@ -85,20 +84,55 @@ fun ScanProgressScreen(
     //   Both are reasonable defaults — if a future iteration wants richer
     //   labels (e.g., the installed app's display name), the caller can
     //   pass the label through the nav route as a second argument.
+    //
+    // AUTO-CHAIN SIMULATION (stellar-trails v9.9.1, user request):
+    //
+    //   User's desired flow:
+    //     scan apk target →
+    //     data result 'blocking-only filter' diperoleh →
+    //     auto simulasi sesuai data result →
+    //     rangkuman hasil test
+    //
+    //   We now call `repo.scanWithAutoSimulation()` instead of `repo.scan()`.
+    //   The Repository chains:
+    //     1. APK scan
+    //     2. Play Integrity auto-call (non-fatal on failure)
+    //     3. DeviceProbe.gather with the PI verdict baked in
+    //     4. NativeBridge.scanSimulatedBlocking(path, profileJson)
+    //   Both the scan Markdown and the simulation Markdown are cached
+    //   (ScanResultCache + SimulationResultCache) so ReportScreen can
+    //   render both sections without re-running either step.
+    //
+    //   The status messages are updated to reflect the chain. The Play
+    //   Integrity step has a 15s warm-up + 10s token request timeout —
+    //   we surface that as "Calling Play Integrity API…" so the user
+    //   knows why the screen is taking longer than a plain scan.
     LaunchedEffect(apkPath) {
-        status = "Scanning DEX strings…"
         val source = ApkSource.Path(
             path = apkPath,
             label = File(apkPath).name,
         )
-        val result = withContext(Dispatchers.IO) { repo.scan(context, source) }
+
+        status = "Scanning DEX strings…"
+        // The Repository.scanWithAutoSimulation runs the entire chain
+        // (scan → PI → probe → blocking-only simulation) on Dispatchers.IO.
+        // We can't surface intermediate progress messages without splitting
+        // the chain into multiple suspend calls — for now, the single status
+        // message above is shown until the chain completes (~5-30s depending
+        // on APK size + Play Integrity warm-up). The user can see the
+        // CircularProgressIndicator the whole time.
+        val result = withContext(Dispatchers.IO) {
+            repo.scanWithAutoSimulation(context, source)
+        }
         // Belt-and-suspenders: if the LaunchedEffect was cancelled while the
         // JNI call was in flight, do NOT fire onDone — the screen is gone.
         if (!isActive) return@LaunchedEffect
         when (result) {
             is ScanResult.Ok -> {
                 status = "Done."
-                ScanResultCache.put(apkPath, result.markdown)
+                // ScanResultCache + SimulationResultCache were populated by
+                // Repository.scanWithAutoSimulation — ReportScreen reads
+                // from both.
                 onDone()
             }
             is ScanResult.Err -> {
@@ -123,6 +157,11 @@ fun ScanProgressScreen(
             ) {
                 CircularProgressIndicator()
                 Text(status, style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    "Auto-running blocking-only simulation + Play Integrity after scan.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 error?.let { msg ->
                     Text(
                         "Error: $msg",

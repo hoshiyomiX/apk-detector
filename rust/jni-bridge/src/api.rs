@@ -11,7 +11,10 @@
 use std::ffi::{c_char, c_int, c_void, CStr};
 use std::sync::OnceLock;
 
-use detector::{device_scan, full_scan, simulate, DeviceProfile, ReportDiff, SimulationReport};
+use detector::{
+    device_scan, full_scan, simulate, simulate_blocking_only, DeviceProfile, ReportDiff,
+    SimulationReport,
+};
 use signatures::SignatureSet as SigSet;
 
 use crate::ensure_logger;
@@ -606,6 +609,82 @@ fn scan_apk_simulated_body(path: &str, profile_json: &str) -> Result<String, Str
     let report = full_scan(path, &mut apk, sigs);
     let sim: SimulationReport = simulate(&report, &profile);
     Ok(sim.to_markdown())
+}
+
+// ---------------------------------------------------------------------------
+// 6b) scanApkSimulatedBlocking(path: String, profileJson: String): String —
+//     Markdown BLOCKING-ONLY simulation report.
+// ---------------------------------------------------------------------------
+//
+// Same scan body as `scanApkSimulated`, but filters the report's findings to
+// only those whose `behavior` is `ProcessKill` / `HardBlock` / `SoftBlock`
+// (i.e., `BlockBehavior::is_user_blocking()`) BEFORE running the verdict
+// table. The output is rendered via `to_markdown_blocking_simulation()`
+// which adds an "Overall Verdict" banner (PASS / FAIL / INCONCLUSIVE /
+// NO BLOCKING DETECTIONS) — the "rangkuman hasil test" the user requested.
+//
+// This is the AUTO-CHAIN step that the user asked for:
+//   scan apk target →
+//   data result 'blocking-only filter' diperoleh (filter applied here) →
+//   auto simulasi sesuai data result (verdict table runs on filtered set) →
+//   rangkuman hasil test (Overall Verdict banner in the markdown)
+//
+// The Kotlin side chains this with PlayIntegrityClient.requestVerdict() +
+// DeviceProbe.gather() to populate `profileJson` with the LIVE device's
+// state — including a real `play_integrity_passes` value if the cloud
+// project number is configured.
+//
+// PANIC SAFETY: same `catch_unwind` wrapper as `scanApk`.
+#[no_mangle]
+pub unsafe extern "system" fn Java_id_zai_apkdetector_data_NativeBridge_scanApkSimulatedBlocking(
+    env: JNIEnvPtr,
+    _class: jclass,
+    path_jstr: jstring,
+    profile_jstr: jstring,
+) -> jstring {
+    ensure_logger();
+    log::info!("scanApkSimulatedBlocking called");
+
+    let path = match jstr_to_string(env, path_jstr) {
+        Ok(s) => s,
+        Err(e) => return return_error(env, &format!("path: {}", e)),
+    };
+    let profile_json = match jstr_to_string(env, profile_jstr) {
+        Ok(s) => s,
+        Err(e) => return return_error(env, &format!("profile: {}", e)),
+    };
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        scan_apk_simulated_blocking_body(&path, &profile_json)
+    }));
+    match result {
+        Ok(Ok(md)) => return_string(env, &md),
+        Ok(Err(e)) => return_error(env, &e),
+        Err(payload) => {
+            let msg = panic_payload_to_string(payload);
+            log::error!(
+                "scanApkSimulatedBlocking panic for {} with profile={}: {}",
+                path,
+                profile_json,
+                msg
+            );
+            return_error(env, &format!("internal panic: {}", msg))
+        }
+    }
+}
+
+/// Body of `scanApkSimulatedBlocking` — extracted so it can be wrapped in
+/// `catch_unwind`.
+fn scan_apk_simulated_blocking_body(path: &str, profile_json: &str) -> Result<String, String> {
+    let profile = DeviceProfile::from_json(profile_json).map_err(|e| format!("profile: {}", e))?;
+    let sigs = sigs()?;
+    let file = std::fs::File::open(path).map_err(|e| format!("open {}: {}", path, e))?;
+    let reader: apk_parser::AnyReader = Box::new(file);
+    let mut apk =
+        apk_parser::open_any(reader, path).map_err(|e| format!("apk parse {}: {}", path, e))?;
+    let report = full_scan(path, &mut apk, sigs);
+    let sim: SimulationReport = simulate_blocking_only(&report, &profile);
+    Ok(sim.to_markdown_blocking_simulation())
 }
 
 // ---------------------------------------------------------------------------
