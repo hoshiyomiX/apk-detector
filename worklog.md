@@ -1856,3 +1856,33 @@ Stage Summary:
 - Commit a9f341b pushed to https://github.com/hoshiyomiX/apk-detector.git
 - Build verification remains pending — needs real Android SDK environment (CI or local dev machine)
 - Stellar-trails skill v9.9.0 used for workflow structure (SPECIFY → PLAN → IMPLEMENT → VERIFY → DELIVER)
+
+---
+Task ID: AC-001 (Auto-Chain)
+Agent: main (super-z)
+Task: Auto-chain scan→PI→probe→blocking-only simulation per user's verbatim flow request
+
+Work Log:
+- Reviewed current code: DeviceScanScreen had opt-in shield-icon Play Integrity toggle; no auto-chain after APK scan
+- Reviewed existing assets: BlockBehavior::is_user_blocking() filter, Report::to_markdown_blocking_only(), simulate(), device_scan() — all in place
+- Designed auto-chain: scan → blocking-filter → PI call → device probe → filtered simulation → overall verdict
+- IMPL-001: Added simulate_blocking_only() in simulator.rs — filters findings to behavior.is_user_blocking() before verdict table
+- IMPL-001: Added SimulationReport::to_markdown_blocking_simulation() — renders "Overall Verdict" banner (PASS/FAIL/INCONCLUSIVE/NO_BLOCKING/SIM_ERROR) as the "rangkuman hasil test"
+- IMPL-002: Re-exported simulate_blocking_only from detector/src/lib.rs
+- IMPL-003: Added JNI export Java_id_zai_apkdetector_data_NativeBridge_scanApkSimulatedBlocking(path, profileJson) in jni-bridge/src/api.rs
+- IMPL-004: Added NativeBridge.scanSimulatedBlocking(path, profileJson) Kotlin wrapper; added SimulationResultCache singleton
+- IMPL-005: Added Repository.scanWithAutoSimulation(context, source) — chains scan→PI→probe→filtered simulation, caches both scan + simulation markdown, persists history
+- IMPL-006: Switched ScanProgressScreen from repo.scan to repo.scanWithAutoSimulation; added hint text about auto-simulation
+- IMPL-007: Updated ReportScreen with SimulationSummaryCard — parses Overall Verdict from simulation markdown, renders colored badge at top of report; renders full simulation markdown below scan report for per-rule drill-down
+- Sanity checks: all files balanced braces; all cross-file symbol references verified via Python script
+- Build verification: DEFERRED — no cargo/gradle in z.ai sandbox
+- Committed as 96eaca9 with detailed Conventional Commits message; pushed to origin/main
+- Remote sync confirmed: local HEAD == remote HEAD == 96eaca9
+
+Stage Summary:
+- Auto-chain implemented end-to-end: scan apk target → blocking-only filter → auto simulasi sesuai data result → rangkuman hasil test (Overall Verdict badge)
+- Play Integrity is AUTO-CALLED as part of the chain (non-fatal on NotConfigured/Error — falls back to null/Unknown verdict)
+- 7 files modified, 840 insertions, 16 deletions
+- Traceability: IMPL-001..IMPL-007 all complete
+- No pivots, no scope drift
+- Build verification pending CI (cargo check + gradle assembleDebug)
