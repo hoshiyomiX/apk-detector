@@ -616,6 +616,157 @@ impl SimulationReport {
         md
     }
 
+    /// Render the report as a **device self-scan** Markdown — same layout as
+    /// [to_markdown] but with device-scan wording in the title + summary.
+    ///
+    /// Used by `device_scan()` to distinguish its output from an APK
+    /// simulation report. The "Findings:" header line uses the same format
+    /// as [to_markdown] so the Kotlin `parseSimCounts` regex still works.
+    pub fn to_markdown_device_scan(&self) -> String {
+        let mut md = String::with_capacity(8 * 1024);
+        let _ = writeln!(md, "# APK Detector — Device Self-Scan Report");
+        let _ = writeln!(md);
+        let _ = writeln!(md, "**Engine:** APK Detector v{}", self.engine_version);
+        let _ = writeln!(md, "**Device:** `(this device)`");
+        let _ = writeln!(md, "**Detected state:** `{}`", self.profile_json);
+        let (triggered, bypassed, unknown) = self.counts();
+        let total = self.entries.len();
+        let _ = writeln!(
+            md,
+            "**Findings:** {} total — {} triggered, {} bypassed, {} unknown",
+            total, triggered, bypassed, unknown
+        );
+        let _ = writeln!(md);
+        let _ = writeln!(
+            md,
+            concat!(
+                "_Each rule below is a detection that a defended APK could ",
+                "run against your device. **Triggered** = the detection would ",
+                "fire on this device (you'd be blocked). **Bypassed** = the ",
+                "detection rule exists but your device defeats it. ",
+                "**Unknown** = a needed signal couldn't be determined from ",
+                "a non-root app context._"
+            )
+        );
+        let _ = writeln!(md);
+
+        // Summary by verdict
+        let _ = writeln!(md, "## Summary");
+        let _ = writeln!(md);
+        let _ = writeln!(md, "| Verdict | Count | Meaning |");
+        let _ = writeln!(md, "|---|---:|---|");
+        let _ = writeln!(
+            md,
+            "| 🔴 Triggered | {} | Detection would fire on this device — you'd be blocked/restricted |",
+            triggered
+        );
+        let _ = writeln!(
+            md,
+            "| 🟢 Bypassed  | {} | Detection rule exists but device state defeats it |",
+            bypassed
+        );
+        let _ = writeln!(
+            md,
+            "| ⚪ Unknown   | {} | Needed signal could not be determined — manually verify |",
+            unknown
+        );
+        let _ = writeln!(md);
+
+        // Per-verdict detail sections — same layout as to_markdown()
+        let _ = writeln!(md, "## Detailed Detections");
+        let _ = writeln!(md);
+
+        if triggered > 0 {
+            let _ = writeln!(
+                md,
+                "### 🔴 Triggered ({} finding{})",
+                triggered,
+                plural_s(triggered)
+            );
+            let _ = writeln!(md);
+            for e in &self.entries {
+                if let SimulationVerdict::Triggered { why } = &e.verdict {
+                    let _ = writeln!(
+                        md,
+                        "**{} {}** `{}`",
+                        e.finding.severity.emoji(),
+                        e.finding.severity.as_str().to_uppercase(),
+                        e.finding.rule_id
+                    );
+                    let _ = writeln!(md, ": {}", e.finding.rule_name);
+                    let _ = writeln!(md);
+                    let _ = writeln!(md, "- Why it triggers: {}", why);
+                    if let Some(hint_key) = &e.finding.bypass_hint_key {
+                        if let Some(hint) = crate::bypass_hints::lookup(hint_key) {
+                            let _ = writeln!(md, "- **Bypass hint:** {}", hint);
+                        }
+                    }
+                    let _ = writeln!(md);
+                }
+            }
+        }
+
+        if bypassed > 0 {
+            let _ = writeln!(
+                md,
+                "### 🟢 Bypassed ({} finding{})",
+                bypassed,
+                plural_s(bypassed)
+            );
+            let _ = writeln!(md);
+            for e in &self.entries {
+                if let SimulationVerdict::Bypassed { how } = &e.verdict {
+                    let _ = writeln!(
+                        md,
+                        "**{} {}** `{}`",
+                        e.finding.severity.emoji(),
+                        e.finding.severity.as_str().to_uppercase(),
+                        e.finding.rule_id
+                    );
+                    let _ = writeln!(md, ": {}", e.finding.rule_name);
+                    let _ = writeln!(md);
+                    let _ = writeln!(md, "- How it's bypassed: {}", how);
+                    let _ = writeln!(md);
+                }
+            }
+        }
+
+        if unknown > 0 {
+            let _ = writeln!(
+                md,
+                "### ⚪ Unknown ({} finding{})",
+                unknown,
+                plural_s(unknown)
+            );
+            let _ = writeln!(md);
+            for e in &self.entries {
+                if let SimulationVerdict::Unknown { note } = &e.verdict {
+                    let _ = writeln!(
+                        md,
+                        "**{} {}** `{}`",
+                        e.finding.severity.emoji(),
+                        e.finding.severity.as_str().to_uppercase(),
+                        e.finding.rule_id
+                    );
+                    let _ = writeln!(md, ": {}", e.finding.rule_name);
+                    let _ = writeln!(md);
+                    let _ = writeln!(md, "- Note: {}", note);
+                    let _ = writeln!(md);
+                }
+            }
+        }
+
+        if total == 0 {
+            let _ = writeln!(
+                md,
+                "_No device-relevant rules to evaluate — verdict table is empty._"
+            );
+            let _ = writeln!(md);
+        }
+
+        md
+    }
+
     /// Render the simulation as JSON. Suitable for machine consumption.
     pub fn to_json(&self) -> String {
         let mut s = String::from("{");
@@ -716,6 +867,68 @@ pub fn simulate(report: &Report, profile: &DeviceProfile) -> SimulationReport {
         .collect();
     SimulationReport {
         apk_path: report.apk_path.clone(),
+        profile_json: profile.to_json(),
+        entries,
+        engine_version: env!("CARGO_PKG_VERSION"),
+    }
+}
+
+/// Run the simulator against the LIVE device described by [profile], without
+/// requiring an APK. Iterates every device-relevant rule in the verdict table
+/// (Root, PlayIntegrity, MtdRasp, AntiHooking, AntiEmulator, CloneRepackage,
+/// AppDefense), evaluates the verdict function on the supplied profile, and
+/// returns a `SimulationReport` whose `apk_path` field is set to
+/// `"(this device)"` so the renderer can distinguish it from an APK scan.
+///
+/// Rules in `AppHardening` (packers) and `AntiTamper` (signature checks) are
+/// excluded — these are APK-side protections, not device-side detections,
+/// and would always return `Bypassed` regardless of device state, diluting
+/// the verdict summary.
+///
+/// ## When to use this vs [simulate]
+///
+/// - Use `simulate` when you have an APK scan report and want to predict
+///   which of THAT APK's detections would fire on a given device.
+/// - Use `device_scan` when you want to know what THIS device's environment
+///   looks like to a typical defended APK — i.e., "what would detect me?".
+pub fn device_scan(profile: &DeviceProfile, sigs: &signatures::SignatureSet) -> SimulationReport {
+    let table = verdict_table();
+    let mut entries: Vec<SimulationEntry> = Vec::with_capacity(table.len());
+
+    for (rule_id, vfn) in &table {
+        // Look up the rule's metadata from the embedded SignatureSet.
+        let rule = match sigs.by_id(rule_id) {
+            Some(r) => r,
+            None => continue, // verdict_table has a rule_id not in YAML — skip
+        };
+
+        // Skip APK-side categories that don't represent device detections.
+        match rule.category {
+            signatures::Category::AppHardening | signatures::Category::AntiTamper => continue,
+            _ => {}
+        }
+
+        let finding = Finding {
+            rule_id: rule.id.clone(),
+            rule_name: rule.name.clone(),
+            category: rule.category,
+            severity: rule.severity,
+            behavior: rule.behavior,
+            evidence: String::new(), // no APK evidence for a device-only scan
+            bypass_hint_key: rule.bypass_hint.clone(),
+        };
+        let verdict = vfn(profile);
+        entries.push(SimulationEntry { finding, verdict });
+    }
+
+    // Note: we do NOT sort entries by severity here. `Severity` doesn't
+    // derive `Ord` (only `Eq + PartialEq`), and adding `Ord` to the
+    // signatures crate would be a cross-crate API change. The markdown
+    // renderer groups entries by verdict (Triggered/Bypassed/Unknown) so
+    // within-group order doesn't matter — the user sees the grouped view.
+
+    SimulationReport {
+        apk_path: "(this device)".to_string(),
         profile_json: profile.to_json(),
         entries,
         engine_version: env!("CARGO_PKG_VERSION"),

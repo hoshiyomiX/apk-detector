@@ -11,7 +11,7 @@
 use std::ffi::{c_char, c_int, c_void, CStr};
 use std::sync::OnceLock;
 
-use detector::{full_scan, simulate, DeviceProfile, ReportDiff, SimulationReport};
+use detector::{device_scan, full_scan, simulate, DeviceProfile, ReportDiff, SimulationReport};
 use signatures::SignatureSet as SigSet;
 
 use crate::ensure_logger;
@@ -606,6 +606,63 @@ fn scan_apk_simulated_body(path: &str, profile_json: &str) -> Result<String, Str
     let report = full_scan(path, &mut apk, sigs);
     let sim: SimulationReport = simulate(&report, &profile);
     Ok(sim.to_markdown())
+}
+
+// ---------------------------------------------------------------------------
+// 7) scanDevice(profileJson: String): String — Markdown device self-scan.
+// ---------------------------------------------------------------------------
+//
+// Runs the simulator's verdict table against the supplied `DeviceProfile`
+// (a JSON object describing the LIVE device's state) WITHOUT requiring an
+// APK. The Kotlin side gathers the profile from Android APIs (Build, Settings,
+// PackageManager, etc.) and passes it across FFI. The Rust side evaluates
+// each device-relevant rule (Root, PlayIntegrity, MtdRasp, AntiHooking,
+// AntiEmulator, CloneRepackage, AppDefense) against the profile and emits
+// a Markdown report showing which detections would TRIGGER on this device
+// vs BYPASS vs UNKNOWN.
+//
+// This is the "scan current device without opening an APK" feature — answers
+// "what would detect me on this phone?". AppHardening (packers) and
+// AntiTamper (signature checks) are excluded: they're APK-side protections,
+// not device-side detections.
+//
+// If the profile JSON fails to parse, returns `{"error":"profile: <msg>"}`.
+//
+// PANIC SAFETY: same `catch_unwind` wrapper as `scanApk`.
+#[no_mangle]
+pub unsafe extern "system" fn Java_id_zai_apkdetector_data_NativeBridge_scanDevice(
+    env: JNIEnvPtr,
+    _class: jclass,
+    profile_jstr: jstring,
+) -> jstring {
+    ensure_logger();
+    log::info!("scanDevice called");
+
+    let profile_json = match jstr_to_string(env, profile_jstr) {
+        Ok(s) => s,
+        Err(e) => return return_error(env, &format!("profile: {}", e)),
+    };
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        scan_device_body(&profile_json)
+    }));
+    match result {
+        Ok(Ok(md)) => return_string(env, &md),
+        Ok(Err(e)) => return_error(env, &e),
+        Err(payload) => {
+            let msg = panic_payload_to_string(payload);
+            log::error!("scanDevice panic with profile={}: {}", profile_json, msg);
+            return_error(env, &format!("internal panic: {}", msg))
+        }
+    }
+}
+
+/// Body of `scanDevice` — extracted so it can be wrapped in `catch_unwind`.
+fn scan_device_body(profile_json: &str) -> Result<String, String> {
+    let profile = DeviceProfile::from_json(profile_json).map_err(|e| format!("profile: {}", e))?;
+    let sigs = sigs()?;
+    let report = device_scan(&profile, sigs);
+    Ok(report.to_markdown_device_scan())
 }
 
 // ---------------------------------------------------------------------------

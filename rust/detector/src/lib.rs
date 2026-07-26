@@ -26,7 +26,7 @@ pub mod simulator;
 
 pub use diff::ReportDiff;
 pub use report::{Finding, Report, ScanOutcome};
-pub use simulator::{simulate, DeviceProfile, SimulationReport, SimulationVerdict};
+pub use simulator::{device_scan, simulate, DeviceProfile, SimulationReport, SimulationVerdict};
 
 use std::io::{Read, Seek};
 

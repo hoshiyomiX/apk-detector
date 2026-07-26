@@ -8,6 +8,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apps
+import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
@@ -30,6 +31,7 @@ fun PickerScreen(
     onScan: (String) -> Unit,
     onHistory: () -> Unit,
     onInstalledApps: () -> Unit,
+    onDeviceScan: () -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -119,6 +121,20 @@ fun PickerScreen(
                 Icon(Icons.Default.Apps, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
                 Text("Scan installed app")
+            }
+
+            // Scan this device — runs the Rust verdict table against the
+            // LIVE device's state (gathered by DeviceProbe) WITHOUT
+            // requiring an APK. Answers "what would detect me on this
+            // phone?" — useful for users who want to check if their rooted
+            // / emulator / Frida-running / dev-options-on device would be
+            // blocked by typical defended APKs.
+            //
+            // Implemented in DeviceScanScreen — see that file for details.
+            OutlinedButton(onClick = onDeviceScan, enabled = !copying, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Default.Devices, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Scan this device")
             }
 
             OutlinedButton(onClick = onHistory, enabled = !copying, modifier = Modifier.fillMaxWidth()) {

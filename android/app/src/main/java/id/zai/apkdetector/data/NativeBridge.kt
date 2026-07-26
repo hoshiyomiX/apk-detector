@@ -21,6 +21,12 @@ package id.zai.apkdetector.data
  *    each finding against the supplied [DeviceProfile] JSON and emits a
  *    simulation report showing which detections would TRIGGER on the device
  *    vs BYPASS vs UNKNOWN. Use [DeviceProfile.presets] for curated profiles.
+ * 7. `scanDevice(profileJson)` — evaluates the device-detection verdict
+ *    table against the LIVE device's state (described by [profileJson])
+ *    WITHOUT requiring an APK. Use [DeviceProbe.gather] to build the
+ *    profile from real Android APIs (Build, Settings, PackageManager, etc.),
+ *    then pass it to [NativeBridge.deviceScan]. Returns a Markdown "device
+ *    self-scan" report showing which detections would fire on this device.
  *
  * ## Threading
  *
@@ -39,6 +45,7 @@ object NativeBridge {
     private external fun engineVersion(): String
     private external fun scanApkBlockingOnly(path: String): String
     private external fun scanApkSimulated(path: String, profileJson: String): String
+    private external fun scanDevice(profileJson: String): String
 
     /** Run a static scan on a single APK file. Returns full Markdown report. */
     fun scan(path: String): ScanResult {
@@ -68,6 +75,25 @@ object NativeBridge {
      */
     fun scanSimulated(path: String, profileJson: String): ScanResult {
         val raw = scanApkSimulated(path, profileJson)
+        return ScanResult.parse(raw)
+    }
+
+    /**
+     * Evaluate the device-detection verdict table against the LIVE device
+     * described by [profileJson] WITHOUT requiring an APK. The profile is
+     * typically built by [DeviceProbe.gather] from real Android APIs.
+     *
+     * Returns a Markdown "device self-scan" report showing which detections
+     * would fire on this device. Same format as [scanSimulated] but with
+     * device-scan wording.
+     *
+     * Naming note: the underlying JNI export is `scanDevice` (matches the
+     * Rust `Java_..._NativeBridge_scanDevice` symbol). The Kotlin public
+     * wrapper is `deviceScan` to avoid the recursive self-call that would
+     * happen if both shared the name `scanDevice`.
+     */
+    fun deviceScan(profileJson: String): ScanResult {
+        val raw = scanDevice(profileJson)
         return ScanResult.parse(raw)
     }
 

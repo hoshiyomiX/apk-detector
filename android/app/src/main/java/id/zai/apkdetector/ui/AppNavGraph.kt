@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import id.zai.apkdetector.ui.screens.DeviceScanScreen
 import id.zai.apkdetector.ui.screens.HistoryScreen
 import id.zai.apkdetector.ui.screens.InstalledAppsScreen
 import id.zai.apkdetector.ui.screens.PickerScreen
@@ -16,6 +17,7 @@ object Routes {
     const val REPORT = "report/{path}"
     const val HISTORY = "history"
     const val INSTALLED_APPS = "installed_apps"
+    const val DEVICE_SCAN = "device_scan"
 }
 
 @Composable
@@ -27,11 +29,17 @@ fun AppNavGraph() {
                 onScan = { path -> nav.navigate("scan/${encode(path)}") },
                 onHistory = { nav.navigate(Routes.HISTORY) },
                 onInstalledApps = { nav.navigate(Routes.INSTALLED_APPS) },
+                onDeviceScan = { nav.navigate(Routes.DEVICE_SCAN) },
             )
         }
         composable(Routes.INSTALLED_APPS) {
             InstalledAppsScreen(
                 onScan = { path -> nav.navigate("scan/${encode(path)}") },
+                onBack = { nav.popBackStack() },
+            )
+        }
+        composable(Routes.DEVICE_SCAN) {
+            DeviceScanScreen(
                 onBack = { nav.popBackStack() },
             )
         }
