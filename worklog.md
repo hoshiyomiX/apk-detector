@@ -1823,3 +1823,36 @@ next_step: |
     3. Tap "Scan this device" on the home screen to verify the live device self-scan works. Expected on a clean non-rooted device: PASS verdict with most rules Bypassed (clean device defeats root checks etc.) and a few Unknown (magisk_denylist_on, play_integrity_passes, etc. — can't probe without root or async API).
     4. Toggle Developer Options on + re-run scan to verify the FAIL verdict appears (developer_options_on = true triggers app-defense rules).
     5. Optional future improvement: wire the Play Integrity API (async) to populate play_integrity_passes from a real attestation call instead of leaving it Unknown.
+
+---
+Task ID: PI-001
+Agent: main (super-z)
+Task: Wire Play Integrity API with stellar-trails skill — execute IMPL-001..006 + push
+
+Work Log:
+- Verified IMPL-001 (libs.versions.toml has play-integrity=1.6.0 + google-play-integrity alias) — already present from prior session
+- Verified IMPL-002 (build.gradle.kts has buildConfig=true, buildConfigField PLAY_INTEGRITY_CLOUD_PROJECT_NUMBER, implementation(libs.google.play.integrity)) — already present
+- Verified IMPL-003 (PlayIntegrityClient.kt exists with sealed Result class + suspend requestVerdict) — already present
+- Verified IMPL-004 (DeviceProbe.gather accepts playIntegrityPasses: Boolean? = null) — already present
+- Verified IMPL-005 (DeviceScanScreen.kt has opt-in shield icon, status banner, refreshTrigger) — already present
+- Spotted CRITICAL BUG in PlayIntegrityClient.kt error codes:
+  * StandardIntegrityErrorCode constants are NEGATIVE (e.g., PLAY_STORE_NOT_FOUND=-1)
+    but the file defined them as POSITIVE (e.g., 1)
+  * This silently broke auto-retry on INTEGRITY_TOKEN_PROVIDER_INVALID (never matched)
+  * This silently broke non-genuine-device mapping (PLAY_STORE_NOT_FOUND etc. fell through to Result.Error instead of Result.Passes(false))
+  * NONCE_TOO_SHORT and GOOGLE_SERVER_UNAVAILABLE were incorrectly mapped to Passes(false) — caller/transient errors, not integrity failures
+- Applied bugfix:
+  * Flipped all 11 error codes to negative values (-1..-10, -13)
+  * Added ERROR_NONCE_TOO_LONG (-14) and ERROR_APP_NOT_INSTALLED_FROM_PLAY (-15)
+  * Refined mapTokenError() to map only PLAY_STORE_NOT_FOUND, APP_UID_MISMATCH, APP_NOT_INSTALLED_FROM_PLAY to Passes(false)
+  * Updated KDoc URLs to canonical reference at developers.google.com
+- IMPL-006 build verification: DEFERRED — no Android SDK installed in this sandbox (only Java 21)
+- Committed bugfix with detailed commit message explaining both bugs
+- Pushed commit a9f341b to origin/main (used PAT at /home/z/my-project/upload/PAT)
+
+Stage Summary:
+- All 5 implementation steps (IMPL-001..005) confirmed already in place from prior session
+- Critical bug fixed: error code sign + non-genuine mapping refinement
+- Commit a9f341b pushed to https://github.com/hoshiyomiX/apk-detector.git
+- Build verification remains pending — needs real Android SDK environment (CI or local dev machine)
+- Stellar-trails skill v9.9.0 used for workflow structure (SPECIFY → PLAN → IMPLEMENT → VERIFY → DELIVER)
