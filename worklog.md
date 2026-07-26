@@ -1655,3 +1655,43 @@ commit_messages:
   before: 5/5 commits had UUID-only subjects (e.g. "7e5ebf44-241a-4de3-b7e3-f69eac51f16d")
   after: 6/6 commits follow Conventional Commits format (feat/fix/docs, ≤72 char subjects, structured bodies)
 next_step: User can pull latest main to get the fix. APK build artifacts available in run #38's upload artifacts.
+
+---
+last_phase: DELIVER
+task: Hapus menu Diff + tambah Device Simulation di Report + fix Scan History tidak merekam
+complexity: Standard
+task_type: Coding
+files_modified:
+  - android/app/src/main/java/id/zai/apkdetector/ui/AppNavGraph.kt (remove DIFF route, REPORT route now {path}, update SCAN->REPORT navigation)
+  - android/app/src/main/java/id/zai/apkdetector/ui/screens/PickerScreen.kt (remove onDiff param + Diff button + CompareArrows import)
+  - android/app/src/main/java/id/zai/apkdetector/ui/screens/DiffScreen.kt (DELETED)
+  - android/app/src/main/java/id/zai/apkdetector/ui/screens/ScanProgressScreen.kt (route through Repository.scan instead of NativeBridge.scan, cache markdown via ScanResultCache, change onDone to () -> Unit)
+  - android/app/src/main/java/id/zai/apkdetector/ui/screens/ReportScreen.kt (refactor to take apkPath, add Device Simulation section with FilterChip row + PASS/FAIL verdict badge + second MarkdownRenderer)
+  - android/app/src/main/java/id/zai/apkdetector/data/NativeBridge.kt (add ScanResultCache singleton)
+  - android/app/src/main/java/id/zai/apkdetector/markdown/MarkdownRenderer.kt (add scrollable: Boolean = true parameter for nested scroll control)
+phase_trace: IDLE→SPECIFY→PLAN→IMPLEMENT→VERIFY→DELIVER
+traceability:
+  - IMPL-001: Delete DiffScreen.kt + remove from PickerScreen + remove from AppNavGraph — ✓
+  - IMPL-002: Add ScanResultCache singleton to NativeBridge.kt — ✓
+  - IMPL-003: Wire ScanProgressScreen to Repository.scan (proximate fix for empty History) — ✓
+  - IMPL-004: Refactor ReportScreen to take apkPath + add simulation chips + verdict badge — ✓
+  - IMPL-005: Update AppNavGraph routes (REPORT carries {path}, drop DIFF, onDone: () -> Unit) — ✓
+discoveries:
+  - bug: NativeBridge.kt import left dangling in ScanProgressScreen after refactor
+    found_while: removing NativeBridge.scan call in favor of repo.scan
+    surface: same
+    action: fix-now
+    outcome: removed unused import in same edit pass
+  - bug: Color import in ReportScreen.kt was unused
+    found_while: reviewing ReportScreen imports after writing
+    surface: same
+    action: fix-now
+    outcome: removed in same edit pass
+  - bug: PickerScreen.kt has pre-existing unused imports (Activity, Intent, ApkDetectorApp, ApkSource)
+    found_while: verifying my edits didn't leave unused imports
+    surface: different
+    action: defer
+    outcome: deferred — pre-existing tech debt, not introduced by this task
+pivot: NONE
+scope_drift: NONE
+next_step: User to test on-device — (1) verify "Diff two versions" button is gone from home, (2) scan an APK and confirm History shows a new entry, (3) tap a device-profile chip in Report and confirm verdict badge + simulation Markdown render correctly. If all green, commit + push.

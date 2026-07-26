@@ -107,6 +107,45 @@ object DeviceProfile {
     )
 }
 
+/**
+ * In-memory cache mapping APK path → Markdown report.
+ *
+ * ## Why this exists
+ *
+ * `ScanProgressScreen` runs the scan, then navigates to `ReportScreen`. The
+ * naive way to pass the result is via a nav-route argument, but Markdown
+ * reports can exceed the Android Bundle size cap (~1 MB after URL-encoding)
+ * and contain `%` characters that trigger `IllegalArgumentException` in
+ * Navigation Compose's `Uri.decode()` (see IMPL-001 crash fix in
+ * `AppNavGraph.kt`).
+ *
+ * Instead, `ScanProgressScreen` writes the Markdown to this cache keyed by
+ * the APK path, then navigates with only the (short, URL-safe) path.
+ * `ReportScreen` reads the Markdown back from the cache. On cache miss
+ * (process death, deep-link, etc.) `ReportScreen` falls back to a fresh
+ * `NativeBridge.scan(apkPath)` call.
+ *
+ * ## Lifecycle
+ *
+ * Process-scoped (object singleton). Cleared automatically on process
+ * death. No eviction policy needed — typical usage is one entry at a time.
+ * `clear()` is provided for explicit cleanup (e.g., a future "clear cache"
+ * button).
+ */
+object ScanResultCache {
+    private val map = mutableMapOf<String, String>()
+
+    fun put(apkPath: String, markdown: String) {
+        map[apkPath] = markdown
+    }
+
+    fun get(apkPath: String): String? = map[apkPath]
+
+    fun clear() {
+        map.clear()
+    }
+}
+
 /** Either a successful scan's Markdown output, or an error message. */
 sealed class ScanResult {
     data class Ok(val markdown: String) : ScanResult()

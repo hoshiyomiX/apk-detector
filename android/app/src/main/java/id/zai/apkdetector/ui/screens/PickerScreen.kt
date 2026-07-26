@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.History
-import androidx.compose.material.icons.filled.CompareArrows
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -29,7 +28,6 @@ import kotlinx.coroutines.withContext
 @Composable
 fun PickerScreen(
     onScan: (String) -> Unit,
-    onDiff: () -> Unit,
     onHistory: () -> Unit,
     onInstalledApps: () -> Unit,
 ) {
@@ -110,12 +108,6 @@ fun PickerScreen(
                 Icon(Icons.Default.Search, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
                 Text(if (copying) "Copying to cache…" else "Pick APK / .apks")
-            }
-
-            OutlinedButton(onClick = onDiff, enabled = !copying, modifier = Modifier.fillMaxWidth()) {
-                Icon(Icons.Default.CompareArrows, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text("Diff two versions")
             }
 
             // Scan an installed app — opens the InstalledAppsScreen which

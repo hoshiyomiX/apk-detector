@@ -5,20 +5,26 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import id.zai.apkdetector.data.NativeBridge
+import id.zai.apkdetector.ApkDetectorApp
+import id.zai.apkdetector.data.ApkSource
 import id.zai.apkdetector.data.ScanResult
+import id.zai.apkdetector.data.ScanResultCache
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
+import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ScanProgressScreen(
     apkPath: String,
-    onDone: (String) -> Unit,
+    onDone: () -> Unit,
     onCancel: () -> Unit,
 ) {
+    val context = LocalContext.current
+    val repo = remember { ApkDetectorApp.get().repository }
     var status by remember { mutableStateOf("Opening APK…") }
     var error by remember { mutableStateOf<String?>(null) }
 
@@ -57,16 +63,43 @@ fun ScanProgressScreen(
     //           normally this throws, but if a different suspension point
     //           runs first the throw is deferred. The explicit `isActive`
     //           check guarantees we never call `onDone` on a dead scope.
+    //
+    // HISTORY FIX (IMPL-003, stellar-trails v9.8.0):
+    //
+    //   BUG: original code called `NativeBridge.scan(apkPath)` directly,
+    //   bypassing `Repository.scan()`. The Repository is the layer that
+    //   inserts a `ScanEntity` into the Room `scans` table on success —
+    //   skipping it meant HistoryScreen was ALWAYS empty (the DAO had no
+    //   rows to return), even though scans completed successfully.
+    //
+    //   FIX: route through `repo.scan(context, ApkSource.Path(...))`. The
+    //   Repository internally calls `NativeBridge.scan(path)` AND inserts
+    //   a history row on `ScanResult.Ok`. We also cache the Markdown in
+    //   `ScanResultCache` keyed by `apkPath` so `ReportScreen` can read
+    //   it without re-scanning (the nav route now carries the path, not
+    //   the Markdown — see IMPL-005 in AppNavGraph.kt).
+    //
+    //   The APK label passed to the history row is the file's basename
+    //   (e.g. `base.apk`). For installed-app scans this is the system
+    //   path's base.apk; for SAF-picked files it's the cache filename.
+    //   Both are reasonable defaults — if a future iteration wants richer
+    //   labels (e.g., the installed app's display name), the caller can
+    //   pass the label through the nav route as a second argument.
     LaunchedEffect(apkPath) {
         status = "Scanning DEX strings…"
-        val result = withContext(Dispatchers.IO) { NativeBridge.scan(apkPath) }
+        val source = ApkSource.Path(
+            path = apkPath,
+            label = File(apkPath).name,
+        )
+        val result = withContext(Dispatchers.IO) { repo.scan(context, source) }
         // Belt-and-suspenders: if the LaunchedEffect was cancelled while the
         // JNI call was in flight, do NOT fire onDone — the screen is gone.
         if (!isActive) return@LaunchedEffect
         when (result) {
             is ScanResult.Ok -> {
                 status = "Done."
-                onDone(result.markdown)
+                ScanResultCache.put(apkPath, result.markdown)
+                onDone()
             }
             is ScanResult.Err -> {
                 error = result.message

@@ -37,13 +37,24 @@ import androidx.compose.ui.unit.sp
  *   - code blocks (```)
  */
 @Composable
-fun MarkdownRenderer(markdown: String, modifier: Modifier = Modifier) {
+fun MarkdownRenderer(
+    markdown: String,
+    modifier: Modifier = Modifier,
+    scrollable: Boolean = true,
+) {
     val blocks = remember(markdown) { parseBlocks(markdown) }
-    Column(
-        modifier = modifier
+    val baseModifier = if (scrollable) {
+        modifier
             .fillMaxWidth()
             .verticalScroll(rememberScrollState())
-            .padding(16.dp),
+            .padding(16.dp)
+    } else {
+        modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+    }
+    Column(
+        modifier = baseModifier,
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         blocks.forEach { block -> renderBlock(block) }
