@@ -1604,3 +1604,18 @@ deferred_discoveries:
   - Task 3 (APK scanning methodology): NOT investigated — out of scope for this crash log.
   - Task 4 (filter blocking detections only): NOT investigated — out of scope for this crash log.
 next_step: User should rebuild APK and test by scanning an APK whose path contains `%` (e.g. `/sdcard/50%Jump/app.apk`) or rotating the device on the Report screen after a scan. If crash does not recur, fix is verified in production. If user wants the long-term refactor (ViewModel + SavedStateHandle), request explicitly.
+
+---
+last_phase: DELIVER
+task: Push crash fix commit to origin/main
+complexity: Simple
+task_type: Coding
+files_modified: none (git push only)
+phase_trace: IDLE→IMPLEMENT→VERIFY→DELIVER (continuation)
+traceability: IMPL-001 (already committed in ca82c09) — pushed to remote
+git_state:
+  - before: local=ca82c09 remote=8bda310 (4 commits ahead, fast-forward)
+  - after : local=ca82c09 remote=ca82c09 (in sync)
+  - pushed_commits: d8a4db2, 24a364c, 12fd6c3, ca82c09
+  - repo: https://github.com/hoshiyomiX/apk-detector.git
+next_step: User can pull/clone on dev machine to build & test. Verification of fix on device still pending.
