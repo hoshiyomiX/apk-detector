@@ -16,6 +16,7 @@
   name: "Debugger detection"
   category: app_defense
   severity: high
+  behavior: hard_block
   evidence_location: dex_string
   patterns:
     - "isDebuggerConnected"
@@ -30,6 +31,7 @@
   name: "ro.debuggable / developer-options flag check"
   category: app_defense
   severity: medium
+  behavior: hard_block
   evidence_location: dex_string
   patterns:
     - "ro.debuggable"
@@ -43,6 +45,7 @@
   name: "VPN interface detection"
   category: app_defense
   severity: medium
+  behavior: soft_block
   evidence_location: dex_string
   patterns:
     - "tun0"
@@ -57,6 +60,7 @@
   name: "Mock location detection"
   category: app_defense
   severity: medium
+  behavior: soft_block
   evidence_location: dex_string
   patterns:
     - "isFromMockProvider"
@@ -70,6 +74,7 @@
   name: "Accessibility-service abuse defense"
   category: app_defense
   severity: high
+  behavior: hard_block
   evidence_location: dex_string
   patterns:
     - "BIND_ACCESSIBILITY_SERVICE"
@@ -83,6 +88,7 @@
   name: "MediaProjection / screen-recording defense"
   category: app_defense
   severity: medium
+  behavior: hard_block
   evidence_location: dex_string
   patterns:
     - "MediaProjection"
@@ -96,6 +102,7 @@
   name: "Widevine DRM attestation check"
   category: app_defense
   severity: high
+  behavior: hard_block
   evidence_location: dex_string
   patterns:
     - "MediaDrm"
@@ -110,6 +117,7 @@
   name: "Samsung KNOX / TIMA attestation"
   category: app_defense
   severity: high
+  behavior: hard_block
   evidence_location: dex_string
   patterns:
     - "com.samsung.android.knox"
@@ -123,6 +131,7 @@
   name: "Google Play Services presence + version check"
   category: app_defense
   severity: medium
+  behavior: soft_block
   evidence_location: dex_string
   patterns:
     - "isGooglePlayServicesAvailable"

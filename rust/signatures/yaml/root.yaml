@@ -5,6 +5,7 @@
   name: "su binary path check"
   category: root
   severity: medium
+  behavior: hard_block
   evidence_location: dex_string
   patterns:
     - "/system/bin/su"
@@ -22,6 +23,7 @@
   name: "su-installed package check"
   category: root
   severity: medium
+  behavior: hard_block
   evidence_location: dex_string
   patterns:
     - "com.topjohnwu.magisk"
@@ -35,6 +37,7 @@
   name: "BusyBox presence check"
   category: root
   severity: low
+  behavior: hard_block
   evidence_location: dex_string
   patterns:
     - "/system/bin/busybox"
@@ -46,6 +49,7 @@
   name: "ro.secure / ro.debuggable property check"
   category: root
   severity: low
+  behavior: hard_block
   evidence_location: dex_string
   patterns:
     - "ro.secure"
@@ -58,6 +62,7 @@
   name: "Magisk native lib presence"
   category: root
   severity: high
+  behavior: process_kill
   evidence_location: native_lib_name
   patterns:
     - "libmagisk"
@@ -69,6 +74,7 @@
   name: "RootBeer library use"
   category: root
   severity: medium
+  behavior: hard_block
   evidence_location: dex_string
   patterns:
     - "com/scottyab/rootbeer"

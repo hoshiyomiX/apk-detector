@@ -1331,7 +1331,7 @@ fn verdict_table() -> HashMap<&'static str, VerdictFn> {
 mod tests {
     use super::*;
     use crate::report::Finding;
-    use signatures::{Category, Severity};
+    use signatures::{BlockBehavior, Category, Severity};
 
     fn make_finding(id: &str, cat: Category, sev: Severity) -> Finding {
         Finding {
@@ -1339,6 +1339,7 @@ mod tests {
             rule_name: format!("Test {}", id),
             category: cat,
             severity: sev,
+            behavior: BlockBehavior::HardBlock,
             evidence: "test".to_string(),
             bypass_hint_key: None,
         }

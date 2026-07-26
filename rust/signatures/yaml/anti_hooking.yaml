@@ -5,6 +5,7 @@
   name: "Frida default-port scan"
   category: anti_hooking
   severity: high
+  behavior: hard_block
   evidence_location: dex_string
   patterns:
     - "127.0.0.1:27042"
@@ -17,6 +18,7 @@
   name: "Frida process-name scan"
   category: anti_hooking
   severity: high
+  behavior: hard_block
   evidence_location: dex_string
   patterns:
     - "frida-server"
@@ -29,6 +31,7 @@
   name: "Frida maps scan"
   category: anti_hooking
   severity: high
+  behavior: hard_block
   evidence_location: dex_string
   patterns:
     - "/proc/self/maps"
@@ -41,6 +44,7 @@
   name: "Xposed Installer package check"
   category: anti_hooking
   severity: medium
+  behavior: hard_block
   evidence_location: dex_string
   patterns:
     - "de.robv.android.xposed.installer"
@@ -51,6 +55,7 @@
   name: "XposedBridge class lookup"
   category: anti_hooking
   severity: high
+  behavior: hard_block
   evidence_location: dex_string
   patterns:
     - "de.robv.android.xposed.XposedBridge"
@@ -61,6 +66,7 @@
   name: "Substrate (Cydia) detection"
   category: anti_hooking
   severity: medium
+  behavior: hard_block
   evidence_location: dex_string
   patterns:
     - "com.saurik.substrate"
@@ -71,6 +77,7 @@
   name: "LSPlant / Pine detector"
   category: anti_hooking
   severity: high
+  behavior: hard_block
   evidence_location: native_lib_name
   patterns:
     - "liblsplant"

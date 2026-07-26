@@ -9,7 +9,7 @@ pub mod loader;
 pub mod types;
 
 pub use loader::{SignatureSet, SignatureSetError};
-pub use types::{Category, DetectionRule, EvidenceLocation, Severity};
+pub use types::{BlockBehavior, Category, DetectionRule, EvidenceLocation, Severity};
 
 /// The 9 detection categories tracked by APK Detector.
 pub const ALL_CATEGORIES: &[Category] = &[

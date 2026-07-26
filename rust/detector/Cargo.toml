@@ -15,3 +15,10 @@ log.workspace = true
 thiserror = "1.0"
 serde.workspace = true
 serde_json = "1.0"
+# Aho-Corasick multi-pattern matcher. Used by `scan_all_dex_once` to scan
+# every DEX string against EVERY rule pattern in a single O(N+M) pass —
+# dramatically faster than the previous O(N×M) per-rule substring scan,
+# and uses constant memory (no string-table cache) so the JNI scan no
+# longer peaks at ~75MB on OCTO (was causing lowmemorykiller SIGKILL on
+# Android devices with 4GB RAM).
+aho-corasick = "1.1"

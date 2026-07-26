@@ -15,6 +15,22 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
 
+    <!--
+        QUERY_ALL_PACKAGES (Android 11+): required so the InstalledAppsScreen
+        can enumerate installed packages via PackageManager.getInstalledPackages()
+        and read their applicationInfo.sourceDir to scan them. Without this
+        permission, Android 11+ returns only a filtered list (system apps +
+        a handful of pre-selected packages) — most user-installed apps would
+        be invisible.
+
+        This is a "sensitive permission" per Play Store policy but acceptable
+        for a security-research / QA tool that the user explicitly runs. The
+        APK Detector app does NOT upload any package data — all scanning is
+        on-device.
+    -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
+
     <!-- No INTERNET permission. No ACCESS_NETWORK_STATE. No ANALYTICS. -->
 
     <application

@@ -7,6 +7,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.CompareArrows
 import androidx.compose.material.icons.filled.Search
@@ -30,6 +31,7 @@ fun PickerScreen(
     onScan: (String) -> Unit,
     onDiff: () -> Unit,
     onHistory: () -> Unit,
+    onInstalledApps: () -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -114,6 +116,17 @@ fun PickerScreen(
                 Icon(Icons.Default.CompareArrows, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
                 Text("Diff two versions")
+            }
+
+            // Scan an installed app — opens the InstalledAppsScreen which
+            // lists all packages via PackageManager. The user picks one,
+            // we read its `applicationInfo.sourceDir` (a real filesystem
+            // path to base.apk) and pass it to NativeBridge.scan directly.
+            // No file copying needed (unlike SAF picker flow).
+            OutlinedButton(onClick = onInstalledApps, enabled = !copying, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Default.Apps, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Scan installed app")
             }
 
             OutlinedButton(onClick = onHistory, enabled = !copying, modifier = Modifier.fillMaxWidth()) {

@@ -5,6 +5,7 @@
   name: "PackageManager.GET_SIGNATURES"
   category: anti_tamper
   severity: high
+  behavior: hard_block
   evidence_location: dex_string
   patterns:
     - "getInstalledPackages"
@@ -17,6 +18,7 @@
   name: "PackageManager GET_SIGNING_CERTIFICATES (v2+)"
   category: anti_tamper
   severity: high
+  behavior: hard_block
   evidence_location: dex_string
   patterns:
     - "GET_SIGNING_CERTIFICATES"
@@ -28,6 +30,7 @@
   name: "APK self-integrity check"
   category: anti_tamper
   severity: high
+  behavior: hard_block
   evidence_location: dex_string
   patterns:
     - "/data/app/"
@@ -41,6 +44,7 @@
   name: "StrictJarVerifier use"
   category: anti_tamper
   severity: medium
+  behavior: hard_block
   evidence_location: dex_string
   patterns:
     - "StrictJarVerifier"
@@ -51,6 +55,7 @@
   name: "DEX CRC sanity check"
   category: anti_tamper
   severity: medium
+  behavior: hard_block
   evidence_location: dex_string
   patterns:
     - "Adler32"

@@ -5,6 +5,7 @@
   name: "Parallel Space / Dual Space detection"
   category: clone_repackage
   severity: high
+  behavior: hard_block
   evidence_location: dex_string
   patterns:
     - "com.lbe.parallel"
@@ -17,6 +18,7 @@
   name: "VirtualApp framework"
   category: clone_repackage
   severity: high
+  behavior: hard_block
   evidence_location: dex_string
   patterns:
     - "com.lody.virtual"
@@ -29,6 +31,7 @@
   name: "Hardcoded package name self-check"
   category: clone_repackage
   severity: high
+  behavior: hard_block
   evidence_location: dex_string
   patterns:
     - "getPackageName().equals"
@@ -40,6 +43,7 @@
   name: "Installer source check"
   category: clone_repackage
   severity: medium
+  behavior: hard_block
   evidence_location: dex_string
   patterns:
     - "getInstallerPackageName"
@@ -51,6 +55,7 @@
   name: "Meta-data clone marker"
   category: clone_repackage
   severity: low
+  behavior: hard_block
   evidence_location: manifest
   patterns:
     - "CLONE_MARKER"

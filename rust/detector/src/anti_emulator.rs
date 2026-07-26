@@ -1,26 +1,18 @@
 //! Anti-emulator scanner. All emulator checks live in DEX.
+//!
+//! DEX scanning is consolidated in `common::scan_all_dex_once` (called
+//! from `lib.rs`). This module's `scan()` is intentionally empty — all
+//! anti-emulator rules use `EvidenceLocation::DexString`, so there's no
+//! manifest / native-lib / zip-entry work to do here.
 
 use std::io::{Read, Seek};
 
 use apk_parser::Apk;
-use signatures::{Category, EvidenceLocation, SignatureSet};
+use signatures::SignatureSet;
 
-use crate::common;
 use crate::Finding;
 
-pub fn scan<R: Read + Seek>(
-    apk: &mut Apk<R>,
-    sigs: &SignatureSet,
-    findings: &mut Vec<Finding>,
-    dex_cap: usize,
-) {
-    let dex_rules: Vec<_> = sigs
-        .by_category(Category::AntiEmulator)
-        .iter()
-        .filter_map(|&i| {
-            let r = &sigs.rules()[i];
-            (r.evidence_location == EvidenceLocation::DexString).then_some(r)
-        })
-        .collect();
-    common::scan_dex_strings(apk, &dex_rules, findings, dex_cap);
+pub fn scan<R: Read + Seek>(_apk: &mut Apk<R>, _sigs: &SignatureSet, _findings: &mut Vec<Finding>) {
+    // All anti-emulator rules are DexString evidence — handled by
+    // `common::scan_all_dex_once` in `lib.rs`. No per-detector work here.
 }

@@ -5,6 +5,7 @@
   name: "Bangcle / Secneo packer"
   category: app_hardening
   severity: high
+  behavior: log_only
   evidence_location: native_lib_name
   patterns:
     - "libsecexe"
@@ -16,6 +17,7 @@
   name: "Bangcle Java loader"
   category: app_hardening
   severity: high
+  behavior: log_only
   evidence_location: dex_string
   patterns:
     - "com/secneo/apk/ApkProtect"
@@ -26,6 +28,7 @@
   name: "Ijiami packer"
   category: app_hardening
   severity: high
+  behavior: log_only
   evidence_location: dex_string
   patterns:
     - "com/ijiami"
@@ -36,6 +39,7 @@
   name: "Qihoo 360 Jiagu"
   category: app_hardening
   severity: high
+  behavior: log_only
   evidence_location: native_lib_name
   patterns:
     - "libjiagu"
@@ -47,6 +51,7 @@
   name: "Tencent Legu packer"
   category: app_hardening
   severity: high
+  behavior: log_only
   evidence_location: native_lib_name
   patterns:
     - "libshell"
@@ -58,6 +63,7 @@
   name: "Tencent Legu Java entry"
   category: app_hardening
   severity: high
+  behavior: log_only
   evidence_location: dex_string
   patterns:
     - "com/tencent/qqgame/legu"
@@ -68,6 +74,7 @@
   name: "NAGA / Ali packer"
   category: app_hardening
   severity: medium
+  behavior: log_only
   evidence_location: native_lib_name
   patterns:
     - "libnaga"

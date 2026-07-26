@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::fmt::Write as _;
 
-use signatures::{Category, DetectionRule, Severity, SignatureSet};
+use signatures::{BlockBehavior, Category, DetectionRule, Severity, SignatureSet};
 
 /// One detected rule firing against the target APK.
 #[derive(Debug, Clone)]
@@ -12,6 +12,13 @@ pub struct Finding {
     pub rule_name: String,
     pub category: Category,
     pub severity: Severity,
+    /// Runtime behavior — what the app actually DOES when this rule fires.
+    /// Populated from the rule's `behavior` field. Used by
+    /// `to_markdown_blocking_only` to filter the report down to findings
+    /// that ACTUALLY restrict user access (process_kill / hard_block /
+    /// soft_block). Findings with `LogOnly` or `Unknown` behavior are
+    /// hidden by the blocking-only filter — they don't block the user.
+    pub behavior: BlockBehavior,
     /// Human-readable evidence (e.g. the matched string + location).
     pub evidence: String,
     pub bypass_hint_key: Option<String>,
@@ -174,14 +181,23 @@ impl Report {
     }
 
     /// Render a **filtered** Markdown report containing only findings whose
-    /// severity `is_blocking()` (i.e., Medium / High / Critical — the
-    /// threshold at which a finding actually blocks or restricts the user
-    /// because they cannot meet the detection criteria).
+    /// `behavior.is_user_blocking()` (i.e., `process_kill` / `hard_block` /
+    /// `soft_block` — the runtime behaviors that ACTUALLY restrict user
+    /// access by forcing the app to stop, blocking the user from proceeding,
+    /// or closing access to features).
     ///
-    /// Findings with `Low` or `Info` severity are dropped from the report.
-    /// The header clearly states the filter is applied, so the audience
-    /// (Dev/QA/researcher) knows this is not the full picture. Use the
-    /// unfiltered `to_markdown` for the full report.
+    /// Findings with `log_only` or `unknown` behavior are dropped — they
+    /// represent detections that record telemetry but don't impact the user.
+    /// This is the SEMANTIC filter the user requested: "Sorting deteksi mana
+    /// saja yang memaksa aplikasi berhenti, stop, dan menutup akses bagi
+    /// user yang terdeteksi. Abaikan deteksi lain jika itu tidak bersifat
+    /// membatasi akses user terdeteksi."
+    ///
+    /// This is a stricter and more accurate filter than the previous
+    /// severity-based filter (Medium/High/Critical) because:
+    /// - Some Medium rules just log telemetry (e.g., `mtd-guardsquare-proguard-mapping`)
+    /// - Some Low rules hard-block the user (e.g., `root-check-ro-secure-prop`)
+    /// - Behavior is the GROUND TRUTH of what happens to the user.
     ///
     /// Same shape as `to_markdown` so the renderer on the UI side can drop
     /// in this method without changes.
@@ -191,9 +207,11 @@ impl Report {
         let _ = writeln!(md);
         let _ = writeln!(
             md,
-            "**Filter:** showing only findings that would **block or restrict** the user \
-             (severity Medium / High / Critical). Low and Info findings are hidden — \
-             use the full report to review them."
+            "**Filter:** showing only findings whose runtime behavior would **force the app \
+             to stop, block the user from proceeding, or close access to features** \
+             (behavior: `process_kill` / `hard_block` / `soft_block`). Findings with \
+             `log_only` or `unknown` behavior are hidden — they record telemetry but do \
+             not impact the user. Use the full report to review them."
         );
         let _ = writeln!(md);
         let _ = writeln!(md, "**Engine:** APK Detector v{}", self.engine_version);
@@ -210,7 +228,7 @@ impl Report {
         let blocking: Vec<&Finding> = self
             .findings
             .iter()
-            .filter(|f| f.severity.is_blocking())
+            .filter(|f| f.behavior.is_user_blocking())
             .collect();
         let total = self.findings.len();
         let dropped = total - blocking.len();
@@ -257,9 +275,10 @@ impl Report {
         if blocking.is_empty() {
             let _ = writeln!(
                 md,
-                "_No blocking detections. The APK does not ship any defense mechanisms \
-                 rated Medium or above. Low/Info findings (if any) are hidden by the \
-                 filter — run a full scan to review them._"
+                "_No blocking detections. The APK does not ship any defenses that would \
+                 force the app to stop, block the user, or close access to features. \
+                 Findings with `log_only` or `unknown` behavior (if any) are hidden by \
+                 the filter — run a full scan to review them._"
             );
             let _ = writeln!(md);
         } else {
@@ -288,10 +307,11 @@ impl Report {
                 for f in sorted {
                     let _ = writeln!(
                         md,
-                        "**{} {}** `{}`",
+                        "**{} {}** `{}` _({})_",
                         f.severity.emoji(),
                         f.severity.as_str().to_uppercase(),
-                        f.rule_id
+                        f.rule_id,
+                        f.behavior.as_str(),
                     );
                     let _ = writeln!(md, ": {}", f.rule_name);
                     let _ = writeln!(md);
@@ -370,6 +390,7 @@ pub(crate) fn finding_from_rule(rule: &DetectionRule, evidence: impl Into<String
         rule_name: rule.name.clone(),
         category: rule.category,
         severity: rule.severity,
+        behavior: rule.behavior,
         evidence: evidence.into(),
         bypass_hint_key: rule.bypass_hint.clone(),
     }
@@ -380,12 +401,13 @@ mod tests {
     use super::*;
     use signatures::SignatureSet;
 
-    fn make_finding(id: &str, sev: Severity, cat: Category) -> Finding {
+    fn make_finding(id: &str, sev: Severity, cat: Category, behavior: BlockBehavior) -> Finding {
         Finding {
             rule_id: id.to_string(),
             rule_name: format!("Test finding {}", id),
             category: cat,
             severity: sev,
+            behavior,
             evidence: "test evidence".to_string(),
             bypass_hint_key: None,
         }
@@ -403,27 +425,67 @@ mod tests {
     }
 
     #[test]
-    fn test_severity_is_blocking_threshold() {
-        // Sanity check the threshold directly on the Severity enum.
-        assert!(!Severity::Info.is_blocking(), "Info must NOT be blocking");
-        assert!(!Severity::Low.is_blocking(), "Low must NOT be blocking");
-        assert!(Severity::Medium.is_blocking(), "Medium MUST be blocking");
-        assert!(Severity::High.is_blocking(), "High MUST be blocking");
+    fn test_behavior_is_user_blocking_threshold() {
+        // Sanity check the threshold directly on the BlockBehavior enum.
+        // process_kill / hard_block / soft_block MUST be user-blocking.
+        // log_only / unknown MUST NOT be user-blocking.
         assert!(
-            Severity::Critical.is_blocking(),
-            "Critical MUST be blocking"
+            BlockBehavior::ProcessKill.is_user_blocking(),
+            "ProcessKill MUST be user-blocking"
+        );
+        assert!(
+            BlockBehavior::HardBlock.is_user_blocking(),
+            "HardBlock MUST be user-blocking"
+        );
+        assert!(
+            BlockBehavior::SoftBlock.is_user_blocking(),
+            "SoftBlock MUST be user-blocking"
+        );
+        assert!(
+            !BlockBehavior::LogOnly.is_user_blocking(),
+            "LogOnly must NOT be user-blocking"
+        );
+        assert!(
+            !BlockBehavior::Unknown.is_user_blocking(),
+            "Unknown must NOT be user-blocking (conservative)"
         );
     }
 
     #[test]
-    fn test_blocking_filter_drops_info_and_low() {
-        // Report with one Info, one Low, one Medium, one High, one Critical
+    fn test_blocking_filter_drops_log_only_and_unknown() {
+        // Report with one of each behavior variant — filter should keep
+        // process_kill / hard_block / soft_block, drop log_only / unknown.
         let findings = vec![
-            make_finding("info-1", Severity::Info, Category::Root),
-            make_finding("low-1", Severity::Low, Category::Root),
-            make_finding("med-1", Severity::Medium, Category::Root),
-            make_finding("high-1", Severity::High, Category::AntiHooking),
-            make_finding("crit-1", Severity::Critical, Category::MtdRasp),
+            make_finding(
+                "log-1",
+                Severity::Medium,
+                Category::Root,
+                BlockBehavior::LogOnly,
+            ),
+            make_finding(
+                "unk-1",
+                Severity::High,
+                Category::Root,
+                BlockBehavior::Unknown,
+            ),
+            make_finding(
+                "soft-1",
+                Severity::Medium,
+                Category::Root,
+                BlockBehavior::SoftBlock,
+            ),
+            make_finding(
+                "hard-1",
+                Severity::High,
+                Category::AntiHooking,
+                BlockBehavior::HardBlock,
+            ),
+            make_finding(
+                "kill-1",
+                Severity::Critical,
+                Category::MtdRasp,
+                BlockBehavior::ProcessKill,
+            ),
         ];
         let report = make_report(findings);
         let sigs = load_sigs();
@@ -435,15 +497,21 @@ mod tests {
             "filtered report header missing: {}",
             md.lines().take(3).collect::<Vec<_>>().join(" | ")
         );
-        // Info + Low findings MUST be hidden
-        assert!(!md.contains("`info-1`"), "Info leaked");
-        assert!(!md.contains("`low-1`"), "Low leaked");
-        // Medium + High + Critical MUST be present
-        assert!(md.contains("`med-1`"), "Medium finding missing from filter");
-        assert!(md.contains("`high-1`"), "High finding missing from filter");
+        // LogOnly + Unknown findings MUST be hidden
+        assert!(!md.contains("`log-1`"), "LogOnly leaked");
+        assert!(!md.contains("`unk-1`"), "Unknown leaked");
+        // SoftBlock + HardBlock + ProcessKill MUST be present
         assert!(
-            md.contains("`crit-1`"),
-            "Critical finding missing from filter"
+            md.contains("`soft-1`"),
+            "SoftBlock finding missing from filter"
+        );
+        assert!(
+            md.contains("`hard-1`"),
+            "HardBlock finding missing from filter"
+        );
+        assert!(
+            md.contains("`kill-1`"),
+            "ProcessKill finding missing from filter"
         );
         // Counts in header: 5 total (3 blocking, 2 hidden)
         let findings_line = md
@@ -458,13 +526,23 @@ mod tests {
     }
 
     #[test]
-    fn test_blocking_filter_with_all_info_low_renders_header() {
-        // Edge case #1: report with only Info/Low — filtered output should
-        // still render the header + "no blocking detections" message,
+    fn test_blocking_filter_with_all_log_only_unknown_renders_header() {
+        // Edge case #1: report with only LogOnly/Unknown — filtered output
+        // should still render the header + "no blocking detections" message,
         // not an empty string.
         let findings = vec![
-            make_finding("info-1", Severity::Info, Category::Root),
-            make_finding("low-1", Severity::Low, Category::AntiEmulator),
+            make_finding(
+                "log-1",
+                Severity::Medium,
+                Category::Root,
+                BlockBehavior::LogOnly,
+            ),
+            make_finding(
+                "unk-1",
+                Severity::High,
+                Category::AntiEmulator,
+                BlockBehavior::Unknown,
+            ),
         ];
         let report = make_report(findings);
         let sigs = load_sigs();
@@ -472,7 +550,7 @@ mod tests {
 
         assert!(
             md.contains("Block/Restrict Filter"),
-            "header missing on all-info-low report"
+            "header missing on all-log-unknown report"
         );
         assert!(
             md.contains("No blocking detections"),
@@ -484,8 +562,8 @@ mod tests {
             "expected 2 hidden count in header"
         );
         // No findings leak
-        assert!(!md.contains("`info-1`"));
-        assert!(!md.contains("`low-1`"));
+        assert!(!md.contains("`log-1`"));
+        assert!(!md.contains("`unk-1`"));
     }
 
     #[test]
@@ -513,18 +591,28 @@ mod tests {
     }
 
     #[test]
-    fn test_blocking_filter_keeps_critical_only() {
-        // Edge case #3: only Critical findings — filter should keep all.
+    fn test_blocking_filter_keeps_process_kill_only() {
+        // Edge case #3: only ProcessKill findings — filter should keep all.
         let findings = vec![
-            make_finding("crit-1", Severity::Critical, Category::MtdRasp),
-            make_finding("crit-2", Severity::Critical, Category::MtdRasp),
+            make_finding(
+                "kill-1",
+                Severity::Critical,
+                Category::MtdRasp,
+                BlockBehavior::ProcessKill,
+            ),
+            make_finding(
+                "kill-2",
+                Severity::Critical,
+                Category::MtdRasp,
+                BlockBehavior::ProcessKill,
+            ),
         ];
         let report = make_report(findings);
         let sigs = load_sigs();
         let md = report.to_markdown_blocking_only(&sigs);
 
-        assert!(md.contains("`crit-1`"));
-        assert!(md.contains("`crit-2`"));
+        assert!(md.contains("`kill-1`"));
+        assert!(md.contains("`kill-2`"));
         let findings_line = md
             .lines()
             .find(|l| l.starts_with("**Findings:**"))
@@ -540,24 +628,59 @@ mod tests {
     fn test_full_report_unaffected_by_filter_addition() {
         // Regression test: adding to_markdown_blocking_only must NOT change
         // the behavior of the original to_markdown method. A report with
-        // mixed severities should still render ALL findings in full mode.
+        // mixed behaviors should still render ALL findings in full mode.
         let findings = vec![
-            make_finding("info-1", Severity::Info, Category::Root),
-            make_finding("med-1", Severity::Medium, Category::Root),
-            make_finding("crit-1", Severity::Critical, Category::MtdRasp),
+            make_finding(
+                "log-1",
+                Severity::Medium,
+                Category::Root,
+                BlockBehavior::LogOnly,
+            ),
+            make_finding(
+                "hard-1",
+                Severity::High,
+                Category::Root,
+                BlockBehavior::HardBlock,
+            ),
+            make_finding(
+                "kill-1",
+                Severity::Critical,
+                Category::MtdRasp,
+                BlockBehavior::ProcessKill,
+            ),
         ];
         let report = make_report(findings);
         let sigs = load_sigs();
         let full_md = report.to_markdown(&sigs);
 
-        // Full report must include ALL findings, including Info
-        assert!(full_md.contains("`info-1`"), "Info missing from full");
-        assert!(full_md.contains("`med-1`"));
-        assert!(full_md.contains("`crit-1`"));
+        // Full report must include ALL findings, including LogOnly
+        assert!(full_md.contains("`log-1`"), "LogOnly missing from full");
+        assert!(full_md.contains("`hard-1`"));
+        assert!(full_md.contains("`kill-1`"));
         // Full report must NOT have the "Block/Restrict Filter" header
         assert!(
             !full_md.contains("Block/Restrict Filter"),
             "full report accidentally shows filter header"
+        );
+    }
+
+    #[test]
+    fn test_yaml_rules_all_have_behavior_set() {
+        // Every YAML rule should have a `behavior:` field set explicitly
+        // (not relying on the `Unknown` default). This catches typos in
+        // YAML migration and ensures the filter works correctly.
+        let sigs = load_sigs();
+        let mut unclassified: Vec<&str> = Vec::new();
+        for rule in sigs.rules() {
+            if rule.behavior == BlockBehavior::Unknown {
+                unclassified.push(&rule.id);
+            }
+        }
+        assert!(
+            unclassified.is_empty(),
+            "Found {} rules with `Unknown` behavior (missing `behavior:` field in YAML?): {}",
+            unclassified.len(),
+            unclassified.join(", ")
         );
     }
 }

@@ -5,6 +5,7 @@
   name: "Promon SHIELD"
   category: mtd_rasp
   severity: critical
+  behavior: process_kill
   evidence_location: native_lib_name
   patterns:
     - "libpromon"
@@ -16,6 +17,7 @@
   name: "Promon SHIELD Java init"
   category: mtd_rasp
   severity: critical
+  behavior: process_kill
   evidence_location: dex_string
   patterns:
     - "com/promon/shield"
@@ -26,6 +28,7 @@
   name: "OneSpan App Shield"
   category: mtd_rasp
   severity: critical
+  behavior: process_kill
   evidence_location: native_lib_name
   patterns:
     - "libAppShield"
@@ -36,6 +39,7 @@
   name: "Arxan/Thales Mobile Protection"
   category: mtd_rasp
   severity: critical
+  behavior: process_kill
   evidence_location: native_lib_name
   patterns:
     - "libarxan"
@@ -46,6 +50,7 @@
   name: "Guardsquare DexGuard"
   category: mtd_rasp
   severity: high
+  behavior: process_kill
   evidence_location: dex_string
   patterns:
     - "com/guardsquare"
@@ -56,6 +61,7 @@
   name: "Guardsquare ProGuard enterprise"
   category: mtd_rasp
   severity: low
+  behavior: log_only
   evidence_location: dex_string
   patterns:
     - "proguard.MapClassLoader"
@@ -65,6 +71,7 @@
   name: "Verimatrix Application Protection"
   category: mtd_rasp
   severity: critical
+  behavior: process_kill
   evidence_location: native_lib_name
   patterns:
     - "libvkey"
@@ -76,6 +83,7 @@
   name: "Pinch Secure / AstraPay"
   category: mtd_rasp
   severity: high
+  behavior: hard_block
   evidence_location: native_lib_name
   patterns:
     - "libpinch"

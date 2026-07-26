@@ -67,6 +67,78 @@ pub enum Severity {
     Critical,
 }
 
+/// Runtime behavior of a detection rule — what the app actually DOES when
+/// the rule fires. This is the semantic classification the user requested:
+/// "Sorting deteksi mana saja yang memaksa aplikasi berhenti, stop, dan
+/// menutup akses bagi user yang terdeteksi. Abaikan deteksi lain jika itu
+/// tidak bersifat membatasi akses user terdeteksi."
+///
+/// Severity (Medium/High/Critical) is a PROXY for "blocks user" but not
+/// exact — some Medium rules just log telemetry, some Low rules hard-block.
+/// Behavior is the GROUND TRUTH.
+///
+/// Used by `Report::to_markdown_blocking_only` to filter the report down
+/// to findings that ACTUALLY restrict user access.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BlockBehavior {
+    /// App calls `System.exit()` / `killProcess()` / `finishAndRemoveTask()`
+    /// — the process dies immediately. User sees "App keeps stopping" or
+    /// the app vanishes without warning.
+    ProcessKill,
+    /// App shows a blocking dialog ("Device rooted, app cannot run") and
+    /// disables core functionality. User cannot proceed without bypassing.
+    HardBlock,
+    /// App shows a warning ("Your device may be insecure") but allows the
+    /// user to proceed. Some features may be restricted (e.g., can't deposit
+    /// checks on rooted device).
+    SoftBlock,
+    /// App records telemetry / analytics / fraud-score but takes no
+    /// user-visible action. Detection exists for server-side risk scoring.
+    LogOnly,
+    /// Behavior not classified — typically because the rule's effect depends
+    /// on app-specific logic we can't statically determine. Excluded from
+    /// the blocking-only filter (conservative: don't claim it blocks).
+    Unknown,
+}
+
+impl BlockBehavior {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            BlockBehavior::ProcessKill => "process_kill",
+            BlockBehavior::HardBlock => "hard_block",
+            BlockBehavior::SoftBlock => "soft_block",
+            BlockBehavior::LogOnly => "log_only",
+            BlockBehavior::Unknown => "unknown",
+        }
+    }
+
+    /// Returns true when this behavior ACTUALLY restricts the user — i.e.,
+    /// the detection forces the app to stop, blocks the user from proceeding,
+    /// or closes access to features. This is the semantic filter the user
+    /// requested: "memaksa aplikasi berhenti, stop, dan menutup akses bagi
+    /// user yang terdeteksi".
+    ///
+    /// Includes: `ProcessKill`, `HardBlock`, `SoftBlock`.
+    /// Excludes: `LogOnly` (no user-visible effect), `Unknown` (conservative
+    /// — don't claim it blocks without evidence).
+    pub fn is_user_blocking(&self) -> bool {
+        matches!(
+            self,
+            BlockBehavior::ProcessKill | BlockBehavior::HardBlock | BlockBehavior::SoftBlock
+        )
+    }
+}
+
+impl Default for BlockBehavior {
+    /// Default to `Unknown` so legacy YAML rules without a `behavior:` field
+    /// are handled gracefully — they're excluded from the blocking-only filter
+    /// rather than incorrectly classified as blocking.
+    fn default() -> Self {
+        BlockBehavior::Unknown
+    }
+}
+
 impl Severity {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -131,6 +203,13 @@ pub struct DetectionRule {
     pub name: String,
     pub category: Category,
     pub severity: Severity,
+    /// Runtime behavior — what the app actually DOES when this rule fires.
+    /// Used by `Report::to_markdown_blocking_only` to filter the report
+    /// down to findings that ACTUALLY restrict user access. Defaults to
+    /// `Unknown` for legacy YAML without a `behavior:` field (conservative
+    /// — excluded from the blocking-only filter).
+    #[serde(default)]
+    pub behavior: BlockBehavior,
     /// Where to look.
     pub evidence_location: EvidenceLocation,
     /// One or more case-sensitive substrings (or regex if `is_regex: true`).

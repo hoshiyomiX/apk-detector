@@ -5,6 +5,7 @@
   name: "Build.FINGERPRINT substring check"
   category: anti_emulator
   severity: medium
+  behavior: hard_block
   evidence_location: dex_string
   patterns:
     - "generic_x86"
@@ -20,6 +21,7 @@
   name: "Build.MANUFACTURER/BRAND check"
   category: anti_emulator
   severity: low
+  behavior: log_only
   evidence_location: dex_string
   patterns:
     - "Build.MANUFACTURER"
@@ -32,6 +34,7 @@
   name: "Emulator-specific file check"
   category: anti_emulator
   severity: high
+  behavior: hard_block
   evidence_location: dex_string
   patterns:
     - "/dev/socket/qemud"
@@ -46,6 +49,7 @@
   name: "Emulator network probe"
   category: anti_emulator
   severity: medium
+  behavior: hard_block
   evidence_location: dex_string
   patterns:
     - "10.0.2.15"
@@ -57,6 +61,7 @@
   name: "Telephony emulator markers"
   category: anti_emulator
   severity: medium
+  behavior: hard_block
   evidence_location: dex_string
   patterns:
     - "15555215554"
@@ -70,6 +75,7 @@
   name: "Sensor / hardware presence check"
   category: anti_emulator
   severity: medium
+  behavior: log_only
   evidence_location: dex_string
   patterns:
     - "SensorManager"
@@ -81,6 +87,7 @@
   name: "BlueStacks / Nox / LDPlayer markers"
   category: anti_emulator
   severity: high
+  behavior: hard_block
   evidence_location: dex_string
   patterns:
     - "/sys/class/dmi/id/sys_vendor"

@@ -166,7 +166,7 @@ fn main() -> ExitCode {
             report
                 .findings
                 .iter()
-                .filter(|f| f.severity.is_blocking())
+                .filter(|f| f.behavior.is_user_blocking())
                 .count(),
             ext_label,
         );

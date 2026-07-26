@@ -5,6 +5,7 @@
   name: "Play Integrity API request"
   category: play_integrity
   severity: high
+  behavior: hard_block
   evidence_location: dex_string
   patterns:
     - "com.google.android.play.core.integrity"
@@ -18,6 +19,7 @@
   name: "Integrity token verification"
   category: play_integrity
   severity: high
+  behavior: hard_block
   evidence_location: dex_string
   patterns:
     - "IntegrityTokenResponse"
@@ -28,6 +30,7 @@
   name: "Legacy SafetyNet attestation"
   category: play_integrity
   severity: medium
+  behavior: hard_block
   evidence_location: dex_string
   patterns:
     - "com.google.android.safetynet"
