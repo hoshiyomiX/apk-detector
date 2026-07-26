@@ -1579,3 +1579,28 @@ next_step: |
          location is defined but not yet implemented in scanner).
        - Consider adding a "behavior filter" toggle in the Compose UI so
          users can switch between severity-based and behavior-based filters.
+
+---
+last_phase: DELIVER
+task: Fix APK Detector crash from bin.kv2.dev/~6a65ed47d9c8790013994061 — IllegalArgumentException: URLDecoder: Illegal hex characters in escape (%) pattern : %J
+complexity: Standard
+task_type: Coding
+files_modified:
+  - android/app/src/main/java/id/zai/apkdetector/ui/AppNavGraph.kt (decode() hardened with try/catch IllegalArgumentException)
+phase_trace: IDLE→SPECIFY→PLAN→IMPLEMENT→VERIFY→DELIVER
+traceability:
+  - IMPL-001: Make decode() defensive in AppNavGraph.kt — ✓
+pivot: YES — previous session assumed crash was in Rust/JNI detector; crash log reveals it is in Kotlin/Compose NavGraph decode() function
+scope_drift: NONE
+crash_signature:
+  exception: java.lang.IllegalArgumentException: URLDecoder: Illegal hex characters in escape (%) pattern : %J
+  crash_site: id.zai.apkdetector.ui.AppNavGraphKt.decode(SourceFile:3) — line 71 of original file (now line 115 post-fix)
+  trigger: AppNavGraphKt$AppNavGraph$1$1$3.invoke = REPORT composable (4th in NavGraph) decoding markdown argument during Recomposer.performRecompose
+  root_cause: decode() calls URLDecoder.decode() on a string that contains a literal `%` not part of a valid %XX escape. Triggered when (a) APK path or markdown contains literal `%` followed by non-hex char, OR (b) Nav saved state restoration pre-decodes the route string once, OR (c) Bundle size cap truncates mid-escape.
+  fix: try { URLDecoder.decode(s, "UTF-8") } catch (_: IllegalArgumentException) { s }
+deferred_discoveries:
+  - Long-term fix: stop passing markdown through nav route — use SavedStateHandle or shared ViewModel. Deferred because defensive catch resolves the crash; refactor is optional.
+  - Task 1 (dev.sh server not starting on platform session restore): NOT investigated — out of scope for this crash log.
+  - Task 3 (APK scanning methodology): NOT investigated — out of scope for this crash log.
+  - Task 4 (filter blocking detections only): NOT investigated — out of scope for this crash log.
+next_step: User should rebuild APK and test by scanning an APK whose path contains `%` (e.g. `/sdcard/50%Jump/app.apk`) or rotating the device on the Report screen after a scan. If crash does not recur, fix is verified in production. If user wants the long-term refactor (ViewModel + SavedStateHandle), request explicitly.
