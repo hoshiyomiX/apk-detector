@@ -18,6 +18,28 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
+
+        // ── Play Integrity API configuration ─────────────────────────────
+        // The Cloud Project Number linked to this app in Google Play Console.
+        // Required for the Standard Play Integrity flow (warm-up → token request).
+        //
+        // Set via the PLAY_INTEGRITY_CLOUD_PROJECT_NUMBER env var (CI secrets
+        // or local ~/.gradle/gradle.properties). Default 0L means "not
+        // configured" — PlayIntegrityClient.requestVerdict() short-circuits
+        // to NotConfigured without making any IPC call to Play services.
+        //
+        // To configure for local development:
+        //   1. Create a Google Cloud project (https://console.cloud.google.com/).
+        //   2. Link your app in Play Console → Setup → App integrity → Cloud project.
+        //   3. Note the Cloud Project Number (NOT the project ID — the numeric ID).
+        //   4. Add to ~/.gradle/gradle.properties:
+        //        PLAY_INTEGRITY_CLOUD_PROJECT_NUMBER=1234567890123
+        //   5. Rebuild the app.
+        buildConfigField(
+            "long",
+            "PLAY_INTEGRITY_CLOUD_PROJECT_NUMBER",
+            "${System.getenv("PLAY_INTEGRITY_CLOUD_PROJECT_NUMBER")?.toLongOrNull() ?: 0L}L",
+        )
     }
 
     // ── Release signing ───────────────────────────────────────────────
@@ -82,6 +104,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     packaging {
@@ -114,4 +137,5 @@ dependencies {
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
     implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.google.play.integrity)
 }

@@ -43,13 +43,26 @@ object DeviceProbe {
     /**
      * Gather the device profile as a JSON string suitable for
      * [NativeBridge.deviceScan]. Schema matches Rust's `DeviceProfile`.
+     *
+     * @param context Android context (required for PackageManager,
+     *     Settings, ConnectivityManager probes).
+     * @param playIntegrityPasses Optional result of a Play Integrity API
+     *     call. Pass `true` if the API issued a token, `false` if it
+     *     refused with a "non-genuine device" error code, or `null` if
+     *     the check was not run (Unknown). When non-null, the
+     *     `play_integrity_passes` field is included in the JSON; when
+     *     null, the field is omitted (Rust treats missing keys as
+     *     `None` → Unknown verdict).
      */
-    fun gather(context: Context): String {
+    fun gather(
+        context: Context,
+        playIntegrityPasses: Boolean? = null,
+    ): String {
         val fields = mutableListOf<Pair<String, Boolean?>>()
 
         fields += "rooted" to detectRoot()
         fields += "magisk_denylist_on" to null // unknown without root
-        fields += "play_integrity_passes" to null // async API call, deferred
+        fields += "play_integrity_passes" to playIntegrityPasses
         fields += "safetynet_passes" to null // deprecated API, deferred
         fields += "installer_is_play_store" to detectInstallerFromPlay(context)
         fields += "in_clone_runtime" to detectCloneRuntime()

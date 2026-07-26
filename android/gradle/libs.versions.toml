@@ -10,6 +10,7 @@ room = "2.6.1"
 coroutines = "1.9.0"
 documentfile = "1.0.1"
 core-ktx = "1.13.1"
+play-integrity = "1.6.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "core-ktx" }
@@ -28,6 +29,7 @@ androidx-room-runtime = { group = "androidx.room", name = "room-runtime", versio
 androidx-room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = "room" }
 androidx-room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
+google-play-integrity = { group = "com.google.android.play", name = "integrity", version.ref = "play-integrity" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
