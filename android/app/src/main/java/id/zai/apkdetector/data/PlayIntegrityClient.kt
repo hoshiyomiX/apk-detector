@@ -243,7 +243,17 @@ object PlayIntegrityClient {
      * [Result.Passes] with value=false — Google explicitly refused to
      * issue a token because the device/app failed integrity.
      *
-     * Other error codes map to [Result.Error] — caller may retry.
+     * - `PLAY_STORE_NOT_FOUND` — Play Store missing or unofficial → non-genuine.
+     * - `APP_UID_MISMATCH` — calling app UID != UID registered with Play → repackaged/clone.
+     * - `APP_NOT_INSTALLED_FROM_PLAY` — sideloaded from outside Play → non-genuine.
+     *
+     * Caller errors (`NONCE_TOO_SHORT`, `NONCE_TOO_LONG`) and transient
+     * network/server errors (`NETWORK_ERROR`, `GOOGLE_SERVER_UNAVAILABLE`,
+     * `TOO_MANY_REQUESTS`, `PLAY_SERVICES_VERSION_TOO_OLD`) are NOT integrity
+     * failures — they map to [Result.Error] so the caller can retry.
+     *
+     * `APP_NOT_INSTALLED` should never happen for the calling app itself
+     * (we are running); if it does, treat as Error (likely Play services bug).
      */
     private fun mapTokenError(e: Exception): Result {
         val code = extractErrorCode(e)
@@ -251,10 +261,8 @@ object PlayIntegrityClient {
             // Non-genuine device/app — Google refused to issue a token.
             // This is a definitive "fails integrity" signal.
             ERROR_PLAY_STORE_NOT_FOUND,
-            ERROR_APP_NOT_INSTALLED,
             ERROR_APP_UID_MISMATCH,
-            ERROR_NONCE_TOO_SHORT,
-            ERROR_GOOGLE_SERVER_UNAVAILABLE,
+            ERROR_APP_NOT_INSTALLED_FROM_PLAY,
             -> Result.Passes(false)
 
             else -> Result.Error(
@@ -270,7 +278,7 @@ object PlayIntegrityClient {
      * The StandardIntegrityManager API throws
      * `com.google.android.gms.common.api.ApiException` with a status code
      * in `statusCode`. The Standard Integrity error codes are documented
-     * at https://developer.android.com/google/play/integrity/error-codes.
+     * at https://developers.google.com/android/reference/com/google/android/play/core/integrity/StandardIntegrityErrorCode.
      */
     private fun extractErrorCode(e: Throwable): Int? {
         // Try ApiException.getStatusCode() via reflection (avoid hard
@@ -299,17 +307,24 @@ object PlayIntegrityClient {
     // the type system (which would require a different import path on
     // different SDK versions).
     //
-    // Source: https://developer.android.com/google/play/integrity/error-codes
+    // IMPORTANT: StandardIntegrityErrorCode constants are all NEGATIVE
+    // integers (e.g., PLAY_STORE_NOT_FOUND = -1). Earlier versions of this
+    // file used positive integers, which silently broke the auto-retry on
+    // INTEGRITY_TOKEN_PROVIDER_INVALID and the non-genuine-device mapping.
+    //
+    // Source: https://developers.google.com/android/reference/com/google/android/play/core/integrity/StandardIntegrityErrorCode
 
-    private const val ERROR_PLAY_STORE_NOT_FOUND = 1
-    private const val ERROR_PLAY_SERVICES_NOT_FOUND = 2
-    private const val ERROR_APP_NOT_INSTALLED = 3
-    private const val ERROR_PLAY_SERVICES_VERSION_TOO_OLD = 4
-    private const val ERROR_APP_UID_MISMATCH = 5
-    private const val ERROR_TOO_MANY_REQUESTS = 6
-    private const val ERROR_CANNOT_BIND_TO_SERVICE = 7
-    private const val ERROR_NETWORK_ERROR = 8
-    private const val ERROR_GOOGLE_SERVER_UNAVAILABLE = 9
-    private const val ERROR_INTEGRITY_TOKEN_PROVIDER_INVALID = 10
-    private const val ERROR_NONCE_TOO_SHORT = 13
+    private const val ERROR_PLAY_STORE_NOT_FOUND = -1
+    private const val ERROR_PLAY_SERVICES_NOT_FOUND = -2
+    private const val ERROR_APP_NOT_INSTALLED = -3
+    private const val ERROR_PLAY_SERVICES_VERSION_TOO_OLD = -4
+    private const val ERROR_APP_UID_MISMATCH = -5
+    private const val ERROR_TOO_MANY_REQUESTS = -6
+    private const val ERROR_CANNOT_BIND_TO_SERVICE = -7
+    private const val ERROR_NETWORK_ERROR = -8
+    private const val ERROR_GOOGLE_SERVER_UNAVAILABLE = -9
+    private const val ERROR_INTEGRITY_TOKEN_PROVIDER_INVALID = -10
+    private const val ERROR_NONCE_TOO_SHORT = -13
+    private const val ERROR_NONCE_TOO_LONG = -14
+    private const val ERROR_APP_NOT_INSTALLED_FROM_PLAY = -15
 }
