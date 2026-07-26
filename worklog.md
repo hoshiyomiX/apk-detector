@@ -1728,3 +1728,98 @@ auth_attempts:
   - approach_3: URL with embedded token https://x-access-token:TOKEN@github.com/...
     result: SUCCESS — afb4237..08d98dd main -> main
 next_step: User to verify on GitHub UI that the 2 new commits appear with proper subjects. Optionally trigger CI build to confirm Kotlin compiles cleanly.
+
+---
+last_phase: DELIVER
+task: Live device self-scan (replaces preset-based simulation) — IMPL-001..008
+complexity: Standard
+task_type: Coding
+files_modified:
+  - rust/detector/src/simulator.rs (new device_scan() + to_markdown_device_scan() method)
+  - rust/detector/src/lib.rs (re-export device_scan)
+  - rust/jni-bridge/src/api.rs (new JNI scanDevice export + scan_device_body helper)
+  - android/app/src/main/java/id/zai/apkdetector/data/NativeBridge.kt (external scanDevice + public deviceScan wrapper)
+  - android/app/src/main/java/id/zai/apkdetector/data/DeviceProbe.kt (NEW — live device signal gatherer)
+  - android/app/src/main/java/id/zai/apkdetector/ui/screens/DeviceScanScreen.kt (NEW — live device report screen)
+  - android/app/src/main/java/id/zai/apkdetector/ui/screens/ReportScreen.kt (removed preset-chip simulation section)
+  - android/app/src/main/java/id/zai/apkdetector/ui/AppNavGraph.kt (added DEVICE_SCAN route + composable)
+  - android/app/src/main/java/id/zai/apkdetector/ui/screens/PickerScreen.kt (added onDeviceScan param + "Scan this device" button)
+phase_trace: IDLE→SPECIFY→PLAN→IMPLEMENT→VERIFY→DELIVER
+traceability:
+  - IMPL-001: device_scan() + to_markdown_device_scan() in simulator.rs — ✓
+  - IMPL-002: re-export device_scan from detector/src/lib.rs — ✓
+  - IMPL-003: JNI scanDevice export in jni-bridge/src/api.rs — ✓
+  - IMPL-004: NativeBridge.scanDevice external + deviceScan wrapper — ✓
+  - IMPL-005: DeviceProbe.kt — live device signal gatherer (14 fields probed, 6 left as null/Unknown) — ✓
+  - IMPL-006: DeviceScanScreen.kt — UI for live device report + PASS/FAIL verdict badge + refresh action — ✓
+  - IMPL-007: ReportScreen.kt — removed preset-chip "Device Simulation" section entirely — ✓
+  - IMPL-008: AppNavGraph + PickerScreen — wire DEVICE_SCAN route + "Scan this device" button — ✓
+
+discoveries:
+  - bug: String literal concatenation with `+` in writeln! macro does NOT compile (Rust rejects &str + &str). Found while writing the long "Each rule below..." explanation in to_markdown_device_scan().
+    found_while: cargo check on first IMPL-001 draft
+    surface: same (simulator.rs I just wrote)
+    action: fix-now
+    outcome: replaced with concat!() macro which pre-concatenates at compile time.
+  - bug: Severity enum doesn't derive Ord (only Eq + PartialEq). My initial device_scan() tried to sort entries by severity via .cmp() — compile error E0599.
+    found_while: cargo check after first fix
+    surface: same (simulator.rs I just wrote)
+    action: fix-now
+    outcome: removed the sort_by call entirely. The markdown renderer already groups entries by verdict (Triggered/Bypassed/Unknown), so within-group order is irrelevant. Adding Ord to the signatures crate would be a cross-crate API change — defer to a future cleanup.
+  - bug: Kotlin wrapper named `scanDevice(profileJson)` would call itself recursively (external must be `scanDevice` per JNI naming convention, can't rename).
+    found_while: writing the public Kotlin wrapper
+    surface: same (NativeBridge.kt I just wrote)
+    action: fix-now
+    outcome: renamed public wrapper to `deviceScan(profileJson)`. External stays `scanDevice` to match JNI symbol.
+
+pivot: NONE
+scope_drift: NONE
+
+user_clarification_driving_this_change: |
+  User's prior request was "tambah hasil simulasi apakah device sudah lolos deteksi apa belum" —
+  I implemented preset-based simulation (clean/rooted-magisk/emulator/frida/dev-options chips).
+  User clarified: "Simulasi deteksi yang saya maksud adalah tes deteksi langsung pada current
+  device tanpa memilih preset apapun. Karena saya perlu result pada current device tanpa perlu
+  membuka target APK."
+  
+  The clarification invalidates the preset-chip approach entirely. The new design:
+    1. Gathers the LIVE device's state via DeviceProbe (real Android API calls)
+    2. Passes the resulting profile JSON to a new Rust JNI export scanDevice
+    3. Rust evaluates the verdict_table() directly against the live profile
+    4. Renders a Markdown report with PASS/FAIL verdict
+    5. Accessible from PickerScreen WITHOUT picking an APK first (per "tanpa perlu membuka target APK")
+
+ci_state:
+  - run #40 (551f406): in_progress at time of push
+  - run #39 (08d98dd): completed/success (previous push)
+  - run #38 (afb4237): completed/success
+
+local_verification:
+  - cargo check --workspace: clean (no errors, no warnings)
+  - cargo clippy --workspace --no-deps: no warnings
+  - cargo test --workspace --lib: 41/41 tests pass (13 detector + 26 simulator + 2 signatures)
+  - JNI export name verified: Java_id_zai_apkdetector_data_NativeBridge_scanDevice matches Kotlin external fun scanDevice
+  - ReportScreen grep for preset-chip remnants: 0 matches (clean removal)
+  - material-icons-extended dependency already present (Icons.Default.Devices resolves)
+
+git_state:
+  - before_push_local: 551f406 (this commit) + 595cfdc (worklog snapshot, UUID subject rewritten to Conventional Commits) + 08d98dd (previous push)
+  - before_push_remote: 08d98dd
+  - push_type: fast-forward (no force-push needed)
+  - push_command: git push https://x-access-token:***@github.com/hoshiyomiX/apk-detector.git main
+  - after_push_remote: 551f406
+  - sync_status: ✓ IN SYNC
+
+uuid_subject_rewrite:
+  - before: "ca4b58d7-97ba-4253-9f73-ccdd2b5533e6" (worklog.md only, local-only commit, never pushed)
+  - after: "docs(worklog): append push event snapshot"
+  - length: 41 chars
+  - method: git commit --amend -m (safe because commit was local-only)
+
+next_step: |
+  User to:
+    1. Wait for CI run #40 to complete (~2-3 min). If green, the Rust + Android APK build artifacts will be available for download.
+    2. Build the APK locally (./gradlew :app:assembleDebug after cargo ndk for the native lib) and install on a test device.
+    3. Tap "Scan this device" on the home screen to verify the live device self-scan works. Expected on a clean non-rooted device: PASS verdict with most rules Bypassed (clean device defeats root checks etc.) and a few Unknown (magisk_denylist_on, play_integrity_passes, etc. — can't probe without root or async API).
+    4. Toggle Developer Options on + re-run scan to verify the FAIL verdict appears (developer_options_on = true triggers app-defense rules).
+    5. Optional future improvement: wire the Play Integrity API (async) to populate play_integrity_passes from a real attestation call instead of leaving it Unknown.
