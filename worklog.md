@@ -1695,3 +1695,36 @@ discoveries:
 pivot: NONE
 scope_drift: NONE
 next_step: User to test on-device — (1) verify "Diff two versions" button is gone from home, (2) scan an APK and confirm History shows a new entry, (3) tap a device-profile chip in Report and confirm verdict badge + simulation Markdown render correctly. If all green, commit + push.
+
+---
+last_phase: DELIVER
+task: Push IMPL-001..005 to origin/main (rewrite UUID commit subjects to Conventional Commits first)
+complexity: Simple
+task_type: Coding
+files_modified:
+  - scripts/rewrite-uuid-msgs.sh (new — filter-branch script for the 2 UUID commits)
+phase_trace: IDLE→IMPLEMENT→VERIFY→DELIVER (continuation, skipped SPECIFY+PLAN)
+continuation_reason: User explicitly instructed "biasakan langsung push commit ke remote repo seperti yang kamu lakukan sebelumnya" — direct continuation of prior session's IMPL-001..005 work.
+push_events:
+  - local_SHA_before_push: 08d98ddb8b9ffb39b4a0ec1762f45a1608589917
+  - remote_SHA_before_push: afb42375d8a6f969451493d3d8db0b156b1f6c26
+  - push_type: fast-forward (no force-push needed — local was 2 commits ahead, 0 behind)
+  - push_command: git push https://x-access-token:***@github.com/hoshiyomiX/apk-detector.git main
+  - remote_SHA_after_push: 08d98ddb8b9ffb39b4a0ec1762f45a1608589917
+  - sync_status: ✓ IN SYNC
+commit_message_rewrites:
+  - before: "736b932c-e1b5-419e-b67c-0ceb1f4bf7aa" (worklog.md only)
+    after: "docs(worklog): append snapshot"
+    length: 30 chars
+  - before: "a7ec0acf-a885-4a7d-99bb-a34130f3d501" (IMPL-001..005 changes)
+    after: "feat(ui): add device simulation, remove diff menu, fix history"
+    length: 62 chars
+    body: yes (multi-line body explaining all 4 changes + traceability IDs)
+auth_attempts:
+  - approach_1: credential helper with f() { echo password=$GH_TOKEN; }
+    result: FAILED — "Invalid username or token" (env var not visible to subshell)
+  - approach_2: http.extraheader=Authorization: Bearer $GH_TOKEN
+    result: FAILED — "could not read Username" (extraheader ignored for HTTPS push)
+  - approach_3: URL with embedded token https://x-access-token:TOKEN@github.com/...
+    result: SUCCESS — afb4237..08d98dd main -> main
+next_step: User to verify on GitHub UI that the 2 new commits appear with proper subjects. Optionally trigger CI build to confirm Kotlin compiles cleanly.
