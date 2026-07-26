@@ -1619,3 +1619,39 @@ git_state:
   - pushed_commits: d8a4db2, 24a364c, 12fd6c3, ca82c09
   - repo: https://github.com/hoshiyomiX/apk-detector.git
 next_step: User can pull/clone on dev machine to build & test. Verification of fix on device still pending.
+
+---
+last_phase: DELIVER
+task: Audit + fix 5 commit messages (UUID → Conventional Commits) + force-push + CI green
+complexity: Standard
+task_type: Coding
+files_modified:
+  - git history (5 commit messages rewritten via filter-branch)
+  - android/app/src/main/java/id/zai/apkdetector/ui/screens/InstalledAppsScreen.kt (added missing Image import)
+phase_trace: IDLE→SPECIFY→PLAN→IMPLEMENT→VERIFY→DELIVER
+traceability:
+  - IMPL-001: Save recovery point (original HEAD 224ce67 saved to /tmp/st-rebase-recovery-sha) — ✓
+  - IMPL-002: git filter-branch --msg-filter to rewrite 5 commit subjects — ✓
+  - IMPL-003: Verify Conventional Commits compliance, authors/dates preserved, file content unchanged — ✓ (initially found 2 subjects >72 chars, fixed and re-ran)
+  - IMPL-004: Force-push --force-with-lease to origin/main — ✓ (224ce67 → 9d7e68b)
+  - IMPL-005: Diagnose CI failure #36 (Unresolved reference 'Image' in InstalledAppsScreen.kt:196) — ✓
+  - IMPL-006: Add missing import androidx.compose.foundation.Image — ✓
+  - IMPL-007: Commit fix as afb4237 + push to origin/main — ✓
+  - IMPL-008: Poll CI until run #38 completed/success — ✓
+discoveries:
+  - bug: Missing Image import in InstalledAppsScreen.kt:196
+    found_while: investigating CI run #36 failure during force-push verification
+    surface: different (InstalledAppsScreen.kt vs commit message rewrite — no file change)
+    action: fix-now
+    outcome: fixed in commit afb4237 (CI run #38 → success)
+    reason: user explicitly asked "sampai green" so fixing CI failure is in scope
+pivot: NONE
+scope_drift: +InstalledAppsScreen.kt Image import (discovered while checking CI failure, in scope per user "sampai green" instruction)
+ci_state:
+  - run #36 (224ce67): failed — compileDebugKotlin Unresolved reference 'Image'
+  - run #37 (9d7e68b): failed — same bug (commit message rewrite didn't fix code)
+  - run #38 (afb4237): SUCCESS — all 25 steps green, both Rust + Android jobs passed
+commit_messages:
+  before: 5/5 commits had UUID-only subjects (e.g. "7e5ebf44-241a-4de3-b7e3-f69eac51f16d")
+  after: 6/6 commits follow Conventional Commits format (feat/fix/docs, ≤72 char subjects, structured bodies)
+next_step: User can pull latest main to get the fix. APK build artifacts available in run #38's upload artifacts.
