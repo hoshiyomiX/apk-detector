@@ -167,7 +167,10 @@ object DeviceProbe {
         // or fall back to reading /proc/self/cmdline.
         val processName = if (Build.VERSION.SDK_INT >= 28) {
             try {
-                android.app.ActivityThread.currentProcessName()
+                // Public API since API 28 — equivalent to the hidden
+                // ActivityThread.currentProcessName() but accessible from
+                // the SDK without reflection.
+                android.app.Application.getProcessName()
             } catch (_: Throwable) {
                 readProcessNameFromCmdline()
             }

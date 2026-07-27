@@ -2,10 +2,8 @@ package id.zai.apkdetector.data
 
 import android.content.Context
 import com.google.android.gms.tasks.Tasks
-import com.google.android.play.core.integrity.StandardIntegrityManager
 import com.google.android.play.core.integrity.IntegrityManagerFactory
-import com.google.android.play.core.integrity.StandardIntegrityTokenProvider
-import com.google.android.play.core.integrity.StandardIntegrityTokenRequest
+import com.google.android.play.core.integrity.StandardIntegrityManager
 import id.zai.apkdetector.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -73,7 +71,7 @@ object PlayIntegrityClient {
      */
     private object providerHolder {
         @Volatile
-        var provider: StandardIntegrityTokenProvider? = null
+        var provider: StandardIntegrityManager.StandardIntegrityTokenProvider? = null
     }
 
     /**
@@ -126,15 +124,15 @@ object PlayIntegrityClient {
             // issue one or not?
             val requestHash = stableRequestHash(context.packageName)
 
-            val tokenRequest = StandardIntegrityTokenRequest.builder()
+            val tokenRequest = StandardIntegrityManager.StandardIntegrityTokenRequest.builder()
                 .setRequestHash(requestHash)
                 .build()
 
             // Try the request, with one automatic retry if the token
             // provider has expired since warm-up. Tasks.await() blocks
             // the IO thread for up to 10s.
-            var tokenResponse: com.google.android.play.core.integrity.StandardIntegrityToken? = null
-            var failure: Result.Error? = null
+            var tokenResponse: StandardIntegrityManager.StandardIntegrityToken? = null
+            var failure: Result? = null
 
             try {
                 tokenResponse = Tasks.await(
@@ -197,14 +195,14 @@ object PlayIntegrityClient {
     private fun getOrPrepareProvider(
         context: Context,
         cloudProjectNumber: Long,
-    ): StandardIntegrityTokenProvider? {
+    ): StandardIntegrityManager.StandardIntegrityTokenProvider? {
         providerHolder.provider?.let { return it }
 
         return try {
             val manager = IntegrityManagerFactory.createStandard(context)
             val provider = Tasks.await(
                 manager.prepareIntegrityToken(
-                    com.google.android.play.core.integrity.PrepareIntegrityTokenRequest.builder()
+                    StandardIntegrityManager.PrepareIntegrityTokenRequest.builder()
                         .setCloudProjectNumber(cloudProjectNumber)
                         .build(),
                 ),
